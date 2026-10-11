@@ -35,8 +35,8 @@ LM Studio.
 - **Answers you can verify.** In the chat, every claim carries its timecode. In a chat about one video, a click scrolls
   the transcript to the passage it rests on; ⌘-click, or any click in a chat about several videos, opens the video at
   that second.
-- **Your model, your rules.** Pick the provider, the model and the language, and edit the system prompt and the
-  summary request in Settings. API keys are kept in the macOS keychain.
+- **The model you already use.** Pick the provider, the model and the answer language, and edit the system prompt and
+  the summary request in Settings. API keys are kept in the macOS keychain.
 - **Many at once.** Videos are fetched in parallel, and a request that stalls is retried on a fresh connection, so a
   batch of twenty takes seconds, not minutes.
 

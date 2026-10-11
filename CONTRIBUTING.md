@@ -47,10 +47,12 @@ scripts/build.sh --run   # package a release build into dist/Nab.app and open it
 - **Secrets stay in the keychain.** API keys are stored with `Keychain` and never written to defaults, files or logs.
 - **Say what happened.** When a fetch fails, a transcript is missing or a provider refuses, the interface says so in
   plain words and keeps what it has. Do not swallow an error the user would want to know about.
-- **One source, one provider.** A new site is a `SourceProvider`; a new model service is a `ProviderKind`. Neither
-  should need changes in the UI. See [ARCHITECTURE.md](ARCHITECTURE.md).
-- **Design tokens.** Colors, type, spacing, radii and motion come from `Sources/NabApp/Design`. A view that needs a new
-  value adds a token instead of a literal. Prefer native controls where they fit.
+- **One source, one provider.** A new site is a `SourceProvider`, which also supplies its cover images and links to a
+  moment; a new model service is a `ProviderKind`. Neither should need changes in the UI. See
+  [ARCHITECTURE.md](ARCHITECTURE.md).
+- **Design tokens.** Colors, type, radii and motion come from `Sources/NabApp/Design`; a view that needs a new one adds
+  a token instead of a literal. A one-off padding or frame size may stay with its view. Prefer native controls where
+  they fit.
 - **Motion that holds up.** Animations must stay smooth at 120 Hz. Measure with `NAB_FRAME_PROBE=1` when you change
   one, and respect Reduce Motion.
 - **Concurrency.** The package uses Swift 6 strict concurrency. Keep network, disk and process work off the main actor.

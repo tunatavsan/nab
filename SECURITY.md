@@ -14,7 +14,7 @@ Examples of what to report:
   select or an unexpected file.
 - An API key written anywhere outside the keychain, or shown in the interface or a log.
 - A `nab://` URL that makes Nab do more than add links, open the library, or open a chat and summarize the links it
-  was given.
+  was given, or a `nab-cite://` URL that does more than show a moment of a video in the open chat.
 - Text from a video or a model that can make Nab run a command or open something without the user acting.
 
 Please include the macOS version, the Nab commit or version, the provider involved and steps to reproduce. Do not

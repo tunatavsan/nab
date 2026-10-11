@@ -54,14 +54,17 @@ see.
 3. Answers are written to the conversation about 30 times a second while they stream, and saved under
    `~/Library/Application Support/Nab/Chats` when the turn ends. A finished summary of a single video is also stored
    on its capture, so it travels with the video in copied context packs.
-4. `Citation.link` turns `[12:40]` and `[2 12:40]` in an answer into links. In a single-video chat, a click scrolls
-   the reader to the passage and highlights it; otherwise it opens the video at that second.
+4. `Citation.link` turns `[12:40]` and `[2 12:40]` in an answer into `nab-cite:` links. In a single-video chat, a click
+   scrolls the reader to the passage and highlights it; otherwise it opens the video at that second. While an answer
+   is being written its links reach the chat's `OpenURLAction`; once it is selectable, macOS sends them to the system,
+   which hands `nab-cite:` back to the app because Nab claims that scheme. Both paths end in `LibraryModel.open`.
 
 ## Interface
 
 SwiftUI views live in AppKit windows and panels: the menu bar panel and the toast are borderless `NSPanel`s, and the
 library is an `NSWindow` with a `NavigationSplitView` and the chat as its inspector. Settings is a page in the library
-window. Colors, type, spacing, radii and motion come from `Design/`; nothing else defines a color, a font or a spring.
+window. Colors, type, radii and motion come from `Design/`; views define no color, font or animation of their own, and
+keep only one-off layout numbers. Animations that loop or bounce stand still when Reduce Motion is on.
 
 Panels open and close on Core Animation springs with a preferred frame rate of 120 Hz. Answers write themselves in with
 `RevealRenderer`, a `TextRenderer` that draws each glyph sharpening out of a blur behind a moving edge. `RevealClock`
@@ -81,16 +84,31 @@ public protocol SourceProvider: Sendable {
     /// Returns the source's stable id for `url`, or nil when this provider does not handle it.
     func identify(_ url: URL) -> String?
     func fetch(_ url: URL) async throws -> Capture
+    /// Cover images for an item, largest first, known from its id alone so they show before the fetch ends.
+    func covers(forID id: String) -> [URL]
+    /// A link that opens the item at a moment.
+    func link(to capture: Capture, at seconds: TimeInterval) -> URL
 }
 ```
 
-Add a `SourceKind`, implement the provider in its own target, and register it in `CaptureCenter` and the CLI. The
-context pack, the library, the chat and the CLI work with it unchanged.
+`covers` and `link` have defaults (no covers until the fetch finds one; links open the item itself). Add a
+`SourceKind`, implement the provider in its own target, and register it in `SourceRegistry.standard` in the app and in
+the CLI. The library, the reader, the context pack, the chat and the CLI work with it unchanged.
 
 ## Tests
 
-`Tests/NabTests` uses Swift Testing and covers the pure parts: link parsing, caption track choice, chapters, captions,
-passages, the context pack, citations, conversations and their files, settings storage and migration, server-sent
-events and the prompts sent to each provider. The command runner is tested against small shell commands that ignore
-their input, flood standard error or fail. `liveSummaryAndFollowUp` fetches a real video
-and asks the configured provider for a summary and a follow-up; it runs only when `NAB_LIVE=1` is set.
+`Tests/NabTests` uses Swift Testing, one suite per area, and needs neither the network nor the user's library or
+keychain:
+
+- **YouTube:** link shapes, chapters, captions, caption track choice, covers and links to a moment.
+- **Library and context pack:** passages, the registry, the pack's structure, text from a video that tries to close the
+  pack's tags, timecodes, the store's files (including long chat ids and unreadable entries) and the `Gate`.
+- **Conversations and settings:** citations, failed turns, prompt language, what is stored and how old defaults
+  migrate.
+- **AI client:** the prompts sent to each provider, server-sent events, server addresses, and the Anthropic and
+  OpenAI-compatible streams end to end against a stubbed `URLSession`.
+- **Command-line providers:** small shell commands that ignore their input, flood standard error, fail, print Markdown
+  paragraphs, emit Claude Code's `stream-json`, or ignore SIGTERM.
+
+The `Live` suite fetches a real video and asks the configured provider for a summary and a follow-up; it runs only
+when `NAB_LIVE=1` is set.
