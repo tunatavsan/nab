@@ -20,7 +20,7 @@ final class StatusController {
     private let center: CaptureCenter
     private var panel: FloatingPanel!
     private var monitors: [Any] = []
-    private let light = CALayer()
+    private let light = CAShapeLayer()
     private var lastInFlight = 0
 
     init(center: CaptureCenter, actions: Actions) {
@@ -102,38 +102,46 @@ final class StatusController {
 
     // MARK: Icon
 
-    /// Two viewfinder corners around a dot.
+    /// The app icon's mark on an 18 pt square, y up: three transcript rows, a caret, and the quote pulled out
+    /// between them. Rows and quote keep the icon's 2:3 weight; every edge lands on the 2x pixel grid.
+    private enum Glyph {
+        static let rows = [
+            NSRect(x: 0.5, y: 13.5, width: 14.5, height: 2),
+            NSRect(x: 0.5, y: 10, width: 11.5, height: 2),
+            NSRect(x: 0.5, y: 2, width: 7, height: 2),
+        ]
+        static let caret = NSRect(x: 0.5, y: 4.5, width: 1, height: 5)
+        static let quote = NSRect(x: 2.5, y: 5.5, width: 15, height: 3)
+    }
+
     static let icon: NSImage = {
         let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { _ in
-            let corners = NSBezierPath()
-            corners.lineWidth = 1.6
-            corners.lineCapStyle = .round
-            corners.lineJoinStyle = .round
-            corners.move(to: NSPoint(x: 3, y: 10.5))
-            corners.line(to: NSPoint(x: 3, y: 15))
-            corners.line(to: NSPoint(x: 7.5, y: 15))
-            corners.move(to: NSPoint(x: 15, y: 7.5))
-            corners.line(to: NSPoint(x: 15, y: 3))
-            corners.line(to: NSPoint(x: 10.5, y: 3))
             Palette.nsTemplateInk.set()
-            corners.stroke()
-            NSBezierPath(ovalIn: NSRect(x: 6.6, y: 6.6, width: 4.8, height: 4.8)).fill()
+            for rect in Glyph.rows + [Glyph.caret, Glyph.quote] {
+                let radius = min(rect.width, rect.height) / 2
+                NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius).fill()
+            }
             return true
         }
         image.isTemplate = true
         return image
     }()
 
-    /// A 6 pt light in the icon's top-right corner: orange and pulsing while fetches run, a short
-    /// green flash when the last one lands.
+    /// The light is the quote itself: drawn out from the caret in orange and pulsing while fetches run, then a
+    /// short green flash when the last one lands.
     private func installLight() {
         guard let button = item.button else { return }
         button.wantsLayer = true
-        light.bounds = CGRect(x: 0, y: 0, width: 6, height: 6)
-        light.cornerRadius = 3
-        light.opacity = 0
         let b = button.bounds
-        light.position = CGPoint(x: b.midX + 6.5, y: button.isFlipped ? b.minY + 5 : b.maxY - 5)
+        let quote = Glyph.quote
+        // The image sits centred in the button; the layer shares the button's axes, which may point down.
+        let y = button.isFlipped ? b.midY + 9 - quote.maxY : b.midY - 9 + quote.minY
+        light.anchorPoint = CGPoint(x: 0, y: 0.5)
+        light.frame = CGRect(x: b.midX - 9 + quote.minX, y: y, width: quote.width, height: quote.height)
+        light.path = CGPath(
+            roundedRect: CGRect(origin: .zero, size: quote.size), cornerWidth: quote.height / 2,
+            cornerHeight: quote.height / 2, transform: nil)
+        light.opacity = 0
         button.layer?.addSublayer(light)
     }
 
@@ -142,15 +150,15 @@ final class StatusController {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         if inFlight > 0 {
-            light.backgroundColor = Palette.nsAccent.cgColor
+            light.fillColor = Palette.nsAccent.cgColor
             let still = LightMotion.reduceMotion
             if light.opacity == 0 {
                 light.opacity = 1
                 if !still {
                     let pop = WindowMotion.layerSpring(
                         response: WindowMotion.popResponse, damping: WindowMotion.popDamping)
-                    pop.keyPath = "transform.scale"
-                    pop.fromValue = 0.2
+                    pop.keyPath = "transform.scale.x"
+                    pop.fromValue = 0.1
                     pop.toValue = 1
                     light.add(pop, forKey: "pop")
                 }
@@ -162,7 +170,7 @@ final class StatusController {
             }
         } else if lastInFlight > 0 {
             light.removeAnimation(forKey: "breathe")
-            light.backgroundColor = Palette.nsOK.cgColor
+            light.fillColor = Palette.nsOK.cgColor
             let fade = CABasicAnimation(keyPath: "opacity")
             fade.fromValue = 1
             fade.toValue = 0

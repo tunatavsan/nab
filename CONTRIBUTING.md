@@ -53,6 +53,8 @@ scripts/build.sh --run   # package a release build into dist/Nab.app and open it
 - **Design tokens.** Colors, type, radii and motion come from `Sources/NabApp/Design`; a view that needs a new one adds
   a token instead of a literal. A one-off padding or frame size may stay with its view. Prefer native controls where
   they fit.
+- **The icon is a source file.** `Resources/AppIcon.icon` is an Icon Composer document; edit it there and
+  `scripts/build.sh` compiles it with `actool`. The menu bar glyph in `MenuPanel.swift` follows the same proportions.
 - **Motion that holds up.** Animations must stay smooth at 120 Hz. Measure with `NAB_FRAME_PROBE=1` when you change
   one, and respect Reduce Motion.
 - **Concurrency.** The package uses Swift 6 strict concurrency. Keep network, disk and process work off the main actor.

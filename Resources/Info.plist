@@ -7,6 +7,7 @@
 	<key>CFBundleDisplayName</key><string>Nab</string>
 	<key>CFBundleExecutable</key><string>Nab</string>
 	<key>CFBundleIconFile</key><string>AppIcon</string>
+	<key>CFBundleIconName</key><string>AppIcon</string>
 	<key>CFBundlePackageType</key><string>APPL</string>
 	<key>CFBundleShortVersionString</key><string>0.1.0</string>
 	<key>CFBundleVersion</key><string>1</string>

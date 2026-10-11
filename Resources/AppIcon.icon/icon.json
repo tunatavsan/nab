@@ -1,0 +1,90 @@
+{
+  "fill": {
+    "linear-gradient": [
+      "extended-srgb:0.11585,0.24017,0.34463,1.00000",
+      "extended-srgb:0.00152,0.03366,0.10626,1.00000"
+    ],
+    "orientation": {
+      "start": {
+        "x": 0.5,
+        "y": 0
+      },
+      "stop": {
+        "x": 0.5,
+        "y": 1
+      }
+    }
+  },
+  "groups": [
+    {
+      "name": "quote",
+      "layers": [
+        {
+          "name": "caret",
+          "image-name": "caret.svg",
+          "glass": true,
+          "fill": {
+            "solid": "extended-srgb:0.98675,0.95725,0.90956,1.00000"
+          }
+        },
+        {
+          "name": "quote",
+          "image-name": "quote.svg",
+          "glass": true,
+          "fill": {
+            "linear-gradient": [
+              "extended-srgb:0.92673,0.27327,0.08924,1.00000",
+              "extended-srgb:0.98929,0.65799,0.37050,1.00000"
+            ],
+            "orientation": {
+              "start": {
+                "x": 0.24999999999999997,
+                "y": 0.5625
+              },
+              "stop": {
+                "x": 0.8928571428571428,
+                "y": 0.5625
+              }
+            }
+          }
+        }
+      ],
+      "shadow": {
+        "kind": "layer-color",
+        "opacity": 0.85
+      },
+      "specular": true,
+      "translucency": {
+        "enabled": false,
+        "value": 0
+      }
+    },
+    {
+      "name": "text",
+      "layers": [
+        {
+          "name": "rows",
+          "image-name": "rows.svg",
+          "glass": true,
+          "fill": {
+            "solid": "extended-srgb:0.39160,0.49308,0.57833,1.00000"
+          }
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.4
+      },
+      "specular": true,
+      "translucency": {
+        "enabled": true,
+        "value": 0.45
+      }
+    }
+  ],
+  "supported-platforms": {
+    "squares": [
+      "macOS"
+    ]
+  }
+}

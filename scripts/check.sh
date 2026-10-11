@@ -5,7 +5,7 @@ cd -P "$(dirname "$0")/.."
 logs="$(mktemp -d "${TMPDIR:-/tmp}/nab-check.XXXXXX")"
 trap 'rm -rf -- "$logs"' EXIT
 
-if ! swift format lint --strict -r Sources Tests scripts/MakeIcon.swift >"$logs/format.log" 2>&1; then
+if ! swift format lint --strict -r Sources Tests >"$logs/format.log" 2>&1; then
     cat "$logs/format.log"
     echo "CHECK: FORMAT — run scripts/format.sh" >&2
     exit 1
