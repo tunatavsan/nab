@@ -186,16 +186,11 @@ struct ChatView: View {
         draft = ""
     }
 
+    /// Links in an answer that is still being written arrive here. Once an answer is selectable, macOS sends its
+    /// links to the system instead, which hands `nab-cite:` links back to the app delegate.
     private func cite(_ url: URL) -> OpenURLAction.Result {
         guard let citation = Citation(url: url) else { return .systemAction }
-        let videos = ordered
-        let index = (citation.video ?? 1) - 1
-        guard videos.indices.contains(index), let capture = videos[index].capture else { return .handled }
-        if videos.count == 1, !NSEvent.modifierFlags.contains(.command) {
-            model.jump(to: videos[index].id, at: citation.seconds)
-        } else {
-            NSWorkspace.shared.open(capture.url(at: citation.seconds))
-        }
+        model.open(citation)
         return .handled
     }
 }

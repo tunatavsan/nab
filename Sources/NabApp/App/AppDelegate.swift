@@ -1,5 +1,6 @@
 import AppKit
 import Carbon.HIToolbox
+import NabCore
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -42,6 +43,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// them and opens a chat that starts with a summary; `nab://library` opens the window. Other tools
     /// (Shortcuts, Raycast, scripts, agents) can drive Nab through these.
     func application(_ application: NSApplication, open urls: [URL]) {
+        // Timecode links from a selectable answer come back through the system (see `ChatView.cite`).
+        for citation in urls.compactMap(Citation.init(url:)) { libraryWindow().open(citation) }
         for url in urls where url.scheme == "nab" {
             let links =
                 URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?

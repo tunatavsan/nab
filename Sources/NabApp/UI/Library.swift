@@ -35,6 +35,8 @@ final class LibraryWindowController: NSObject, NSWindowDelegate {
         NSApp.activate()
     }
 
+    func open(_ citation: Citation) { model.open(citation) }
+
     func showSettings() {
         model.page = .settings
         show(select: [])
@@ -89,6 +91,20 @@ final class LibraryModel {
     var chatIDs: [String] { selected.map(\.id) }
 
     func jump(to entryID: String, at seconds: TimeInterval) { focus = Focus(entryID: entryID, seconds: seconds) }
+
+    /// Follows a timecode link from the chat. In a chat about one video the reader scrolls to the passage; with
+    /// ⌘, or in a chat about several videos, the video opens at that second.
+    func open(_ citation: Citation) {
+        let ids = assistant.conversation(chatIDs)?.entryIDs ?? chatIDs
+        let videos = ids.compactMap { center.entry($0) }.filter { $0.capture != nil }
+        let index = (citation.video ?? 1) - 1
+        guard videos.indices.contains(index), let capture = videos[index].capture else { return }
+        if videos.count == 1, !NSEvent.modifierFlags.contains(.command) {
+            jump(to: videos[index].id, at: citation.seconds)
+        } else {
+            NSWorkspace.shared.open(capture.url(at: citation.seconds))
+        }
+    }
 
     /// Opens the chat and summarizes the selection unless that chat already started.
     func summarize() {
