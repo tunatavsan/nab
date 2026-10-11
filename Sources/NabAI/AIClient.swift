@@ -184,28 +184,37 @@ public struct AIClient: Sendable {
             for try await byte in bytes.prefix(4096) { body.append(byte) }
             try Self.check(response, body)
         }
-        // `AsyncBytes.lines` drops blank lines, and a blank line is what ends an event, so lines are split here.
         var parser = ServerSentEvents()
-        var line = Data()
-        func dispatch(_ payload: String?) throws -> Bool {
-            guard let payload else { return true }
+        try await Self.eachLine(of: bytes) { line in
+            // The end of the stream ends the last event too.
+            guard let payload = parser.feed(line ?? "") else { return true }
             if payload == "[DONE]" { return false }
             if let json = try? JSONSerialization.jsonObject(with: Data(payload.utf8)) as? [String: Any] {
                 try handle(json)
             }
             return true
         }
+    }
+
+    /// Calls `body` with each line of `bytes`, blank lines included, then once with nil at the end; `body` returns
+    /// false to stop. `AsyncBytes.lines` drops blank lines, and here they carry meaning: one ends a server-sent
+    /// event, and one separates two paragraphs of a command's Markdown answer.
+    static func eachLine<Bytes: AsyncSequence>(
+        of bytes: Bytes, _ body: (String?) throws -> Bool
+    ) async throws where Bytes.Element == UInt8 {
+        var line = Data()
         for try await byte in bytes {
             guard byte == UInt8(ascii: "\n") else {
                 line.append(byte)
                 continue
             }
+            if line.last == UInt8(ascii: "\r") { line.removeLast() }
             let text = String(decoding: line, as: UTF8.self)
             line.removeAll(keepingCapacity: true)
-            guard try dispatch(parser.feed(text)) else { return }
+            guard try body(text) else { return }
         }
-        _ = try dispatch(parser.feed(String(decoding: line, as: UTF8.self)))
-        _ = try dispatch(parser.feed(""))
+        if !line.isEmpty { guard try body(String(decoding: line, as: UTF8.self)) else { return } }
+        _ = try body(nil)
     }
 
     private func authorize(_ request: inout URLRequest) {
@@ -279,7 +288,7 @@ public struct AIClient: Sendable {
             }
         }
         defer {
-            if process.isRunning { process.terminate() }
+            Self.stop(process)
             errors.fileHandleForReading.readabilityHandler = nil
         }
         try process.run()
@@ -299,13 +308,14 @@ public struct AIClient: Sendable {
         var streamed = false
         var failure: String?
         try await withTaskCancellationHandler {
-            for try await line in output.fileHandleForReading.bytes.lines {
+            try await Self.eachLine(of: output.fileHandleForReading.bytes) { line in
+                guard let line else { return false }
                 guard structured else {
                     out.yield(line + "\n")
-                    continue
+                    return true
                 }
                 guard let json = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any] else {
-                    continue
+                    return true
                 }
                 switch json["type"] as? String {
                 case "stream_event":
@@ -326,9 +336,10 @@ public struct AIClient: Sendable {
                     }
                 default: break
                 }
+                return true
             }
         } onCancel: {
-            process.terminate()
+            Self.stop(process)
         }
         var status: Int32 = 0
         for await code in exit { status = code }
@@ -339,6 +350,19 @@ public struct AIClient: Sendable {
             for _ in 0..<10 where !errorTail.isClosed { try? await Task.sleep(for: .milliseconds(50)) }
             let message = errorTail.text.map { ": \($0)" } ?? "."
             throw NabError("The command failed (exit \(status))\(message)")
+        }
+    }
+}
+
+extension AIClient {
+    /// Asks the command to end, then forces it two seconds later if it is still running, since a command can
+    /// ignore SIGTERM.
+    fileprivate static func stop(_ process: Process) {
+        guard process.isRunning else { return }
+        process.terminate()
+        let pid = process.processIdentifier
+        DispatchQueue.global().asyncAfter(deadline: .now() + 2) {
+            if process.isRunning { kill(pid, SIGKILL) }
         }
     }
 }

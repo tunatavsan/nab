@@ -81,8 +81,11 @@ final class RevealClock {
         return head
     }
 
-    /// Clocks of messages still revealing; pruned as they finish.
+    /// Clocks of messages still revealing; pruned as they finish. A message whose stream fails is never asked
+    /// for its clock again, so the registry is also capped, dropping the oldest.
     private static var clocks: [UUID: RevealClock] = [:]
+    private static let capacity = 16
+    @ObservationIgnored private let created = Date()
 
     /// The clock of a message being written, created when it starts streaming.
     static func clock(for id: UUID, streaming: Bool) -> RevealClock? {
@@ -94,6 +97,9 @@ final class RevealClock {
         }
         guard streaming else { return nil }
         clocks = clocks.filter { !$0.value.finished }
+        if clocks.count >= capacity, let oldest = clocks.min(by: { $0.value.created < $1.value.created }) {
+            clocks[oldest.key] = nil
+        }
         let clock = RevealClock()
         clocks[id] = clock
         return clock

@@ -8,6 +8,8 @@ import SwiftUI
 struct SettingsView: View {
     @Bindable var assistant: Assistant
     @State private var key = ""
+    /// The provider the key field belongs to. It trails `kind` until the typed key is saved.
+    @State private var keyKind = ProviderKind.claudeCLI
     @State private var keyError: String?
     @FocusState private var keyFocused: Bool
     @State private var models: [String] = []
@@ -133,11 +135,20 @@ struct SettingsView: View {
         .formStyle(.grouped)
         .frame(maxWidth: 720)
         .frame(maxWidth: .infinity)
-        .onAppear { key = assistant.key(for: kind) }
-        .onChange(of: kind) { old, _ in
-            // The field still holds the previous provider's key.
-            saveKey(for: old)
+        .onAppear {
+            keyKind = kind
             key = assistant.key(for: kind)
+        }
+        .onChange(of: kind) { _, new in
+            guard new != keyKind else { return }
+            // The field still holds the previous provider's key. If it cannot be saved, stay on that provider
+            // with the error showing, rather than dropping what the user typed.
+            guard saveKey() else {
+                assistant.settings.kind = keyKind
+                return
+            }
+            keyKind = new
+            key = assistant.key(for: new)
             keyError = nil
             test = .idle
         }
@@ -149,16 +160,19 @@ struct SettingsView: View {
         .task(id: "\(kind.rawValue)|\(assistant.settings.baseURL)|\(key.count)") { await loadModels() }
     }
 
-    /// Writes the typed key to the keychain; called on submit, blur, provider change and disappear
-    /// rather than per keystroke.
-    private func saveKey(for target: ProviderKind? = nil) {
-        let target = target ?? kind
-        guard target.usesKey, key != assistant.key(for: target) else { return }
+    /// Writes the typed key to the keychain; called on submit, blur, provider change, Test and disappear
+    /// rather than per keystroke. Returns false when the keychain refused it.
+    @discardableResult
+    private func saveKey() -> Bool {
+        guard keyKind.usesKey, key != assistant.key(for: keyKind) else { return true }
         do {
-            try assistant.setKey(key, for: target)
+            try assistant.setKey(key, for: keyKind)
             keyError = nil
+            return true
         } catch {
             keyError = error.localizedDescription
+            NSLog("Nab: \(keyKind.title) key not saved: \(error.localizedDescription)")
+            return false
         }
     }
 
@@ -197,7 +211,10 @@ struct SettingsView: View {
 
     private func runTest() {
         // Clicking a button does not take focus from the key field, so the key is saved here.
-        saveKey()
+        guard saveKey() else {
+            test = .failed(keyError ?? "The key could not be saved.")
+            return
+        }
         let client = assistant.client
         if let problem = client.problem {
             test = .failed(problem)

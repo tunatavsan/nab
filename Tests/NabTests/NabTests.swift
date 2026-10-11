@@ -270,3 +270,24 @@ private func runCLI(_ command: String, prompt: String = "question") async throws
         #expect(error.localizedDescription.contains("not signed in"))
     }
 }
+
+@Test(.timeLimit(.minutes(1))) func plainOutputKeepsParagraphBreaks() async throws {
+    #expect(try await runCLI("printf 'one\\n\\ntwo\\n'") == "one\n\ntwo\n")
+}
+
+@Test(.timeLimit(.minutes(1))) func stoppingAnAnswerEndsACommandThatIgnoresSIGTERM() async throws {
+    let pidFile = FileManager.default.temporaryDirectory.appending(path: "nab-test-\(UUID().uuidString).pid")
+    defer { try? FileManager.default.removeItem(at: pidFile) }
+    let answer = Task { try await runCLI("echo $$ > '\(pidFile.path)'; trap '' TERM; sleep 30") }
+    var pid: pid_t?
+    for _ in 0..<100 where pid == nil {
+        try await Task.sleep(for: .milliseconds(50))
+        pid = (try? String(contentsOf: pidFile, encoding: .utf8))
+            .flatMap { pid_t($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+    }
+    let running = try #require(pid)
+    answer.cancel()
+    _ = await answer.result
+    try await Task.sleep(for: .seconds(3))
+    #expect(kill(running, 0) != 0, "the command is still running")
+}
