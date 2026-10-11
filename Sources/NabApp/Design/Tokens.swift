@@ -2,8 +2,8 @@ import AppKit
 import SwiftUI
 
 // Nab's visual language: glass cells stacked inside a thin ring, DM Sans for words, SF Mono for
-// numbers and shortcuts, neutral inks, and one ember colour for the primary action. Every view takes
-// its colours, sizes and springs from here; a literal anywhere else is a bug.
+// numbers and shortcuts, neutral inks, and one orange accent for the primary action. Colors, type,
+// radii and motion come from this folder; one-off layout numbers (a padding, a frame) may stay in the view.
 
 enum Palette {
     static let ink = dynamic(dark: 0xE8EAED, light: 0x14161A)
@@ -16,19 +16,37 @@ enum Palette {
     static let rim = Color.white.opacity(0.16)
     /// Behind thumbnails while they load.
     static let well = dynamic(dark: 0x0A0B0D, light: 0x222529)
-    /// Nab's action colour, used only for the primary button and work in flight.
+    /// Nab's action color, used only for the primary button and work in flight.
     static let accent = dynamic(dark: 0xE0622A, light: 0xD4581F)
     static let accentWash = dynamic(dark: 0xE0622A, light: 0xD4581F, darkAlpha: 0.16, lightAlpha: 0.12)
     static let onAccent = Color.white
+    /// The accent at rest on the primary button, when disabled, and as a faint send button.
+    static let accentIdle = accent.opacity(0.92)
+    static let accentDim = accent.opacity(0.5)
+    static let accentFaint = accent.opacity(0.35)
+    /// Glow under the primary button, and the composer's border while it has focus.
+    static let accentGlow = accent.opacity(0.45)
+    /// Light rim on the primary button.
+    static let onAccentRim = Color.white.opacity(0.18)
+    /// Halo around a hovered tool icon.
+    static let glow = ink.opacity(0.45)
+    /// Over a thumbnail while it loads or has failed, and the ink drawn on it.
+    static let scrim = Color.black.opacity(0.45)
+    static let scrimStrong = Color.black.opacity(0.55)
+    static let onScrim = Color.white
     static let ok = dynamic(dark: 0x62B48C, light: 0x236A4B)
     /// Failures shown inline.
     static let error = dynamic(dark: 0xF07178, light: 0xB3261E)
+    /// Behind text editors.
+    static let field = Color.primary.opacity(0.06)
     /// Fill and border of round glass controls, at rest and while hovered.
     static let control = dynamic(dark: 0xFFFFFF, light: 0x14181E, darkAlpha: 0.06, lightAlpha: 0.06)
     static let controlHover = dynamic(dark: 0xFFFFFF, light: 0x14181E, darkAlpha: 0.12, lightAlpha: 0.10)
     static let controlBorder = dynamic(dark: 0xFFFFFF, light: 0x14181E, darkAlpha: 0.08, lightAlpha: 0.10)
     static let controlBorderHover = dynamic(dark: 0xFFFFFF, light: 0x14181E, darkAlpha: 0.18, lightAlpha: 0.18)
 
+    /// Template images use only alpha, so the ink color is ignored.
+    static let nsTemplateInk = NSColor.black
     static let nsAccent = NSColor(srgbRed: 0xE0 / 255, green: 0x62 / 255, blue: 0x2A / 255, alpha: 1)
     static let nsOK = NSColor(srgbRed: 0x62 / 255, green: 0xB4 / 255, blue: 0x8C / 255, alpha: 1)
 
@@ -68,6 +86,18 @@ enum Typeface {
     static let mono = Font.system(size: 12, design: .monospaced).monospacedDigit()
     /// Commands and prompts being edited.
     static let code = Font.system(size: 12, design: .monospaced)
+    /// Symbols. Sizes follow where the symbol sits, not the text beside it.
+    static let iconHero = Font.system(size: 20, weight: .semibold)
+    static let iconTool = Font.system(size: 18)
+    static let iconLead = Font.system(size: 16)
+    static let iconMark = Font.system(size: 16, weight: .semibold)
+    static let iconButton = Font.system(size: 15, weight: .semibold)
+    static let iconAction = Font.system(size: 14, weight: .semibold)
+    static let icon = Font.system(size: 13, weight: .semibold)
+    static let iconBadge = Font.system(size: 12, weight: .bold)
+    static let iconSmall = Font.system(size: 10, weight: .bold)
+    static let iconMicro = Font.system(size: 9, weight: .bold)
+    static let iconSend = Font.system(size: 13, weight: .bold)
     /// Timecodes cited inside an answer.
     static let cite = Font.system(size: 12.5, weight: .medium, design: .monospaced).monospacedDigit()
 

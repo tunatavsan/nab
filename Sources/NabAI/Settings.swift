@@ -49,7 +49,7 @@ public enum ProviderKind: String, Codable, CaseIterable, Sendable, Identifiable 
         case .claudeCLI:
             #"claude -p --system-prompt "$NAB_SYSTEM" ${NAB_MODEL:+--model "$NAB_MODEL"} --tools "" --strict-mcp-config --no-session-persistence --output-format stream-json --include-partial-messages --verbose"#
         case .codexCLI:
-            #"codex exec --skip-git-repo-check ${NAB_MODEL:+-m "$NAB_MODEL"} -"#
+            #"codex exec --skip-git-repo-check --sandbox read-only ${NAB_MODEL:+-m "$NAB_MODEL"} -"#
         default: ""
         }
     }
@@ -146,8 +146,8 @@ public struct AISettings: Codable, Sendable, Equatable {
         Summarize in {language}. Open with one sentence: what the video is and its central claim. Then **Key points**: 3 to 7 bullets, each ending with its timecode. Then **Worth acting on**: up to 3 bullets, only if the video teaches something practical. With several videos, do this for each under its title, then add **Across the videos**: where they agree and where they differ. Auto-generated captions garble names and numbers; flag doubtful ones instead of guessing.
         """
 
-    /// Built-in values from earlier versions. A stored copy of one means "the default", so it
-    /// follows later improvements instead of freezing the old text.
+    /// Built-in values from builds before this one, including those before the first public release. A stored
+    /// copy of one means "the default", so it follows later improvements instead of freezing the old text.
     static let previousSystemPrompts: Set<String> = [
         """
         You are the assistant inside Nab. The user collected one or more videos; their details and timecoded transcripts are in the first message, inside <nab_context>.
@@ -164,22 +164,21 @@ public struct AISettings: Codable, Sendable, Equatable {
         """
     ]
     static let previousCommands: Set<String> = [
-        #"claude -p --system-prompt "$NAB_SYSTEM" ${NAB_MODEL:+--model "$NAB_MODEL"} --tools "" --strict-mcp-config --no-session-persistence"#
+        #"claude -p --system-prompt "$NAB_SYSTEM" ${NAB_MODEL:+--model "$NAB_MODEL"} --tools "" --strict-mcp-config --no-session-persistence"#,
+        #"codex exec --skip-git-repo-check ${NAB_MODEL:+-m "$NAB_MODEL"} -"#,
     ]
 
     /// Languages offered for answers, by English name. The stored value is the English name, which the prompts use.
-    public static let languages: [(name: String, native: String)] = [
-        "ar", "de", "el", "en", "es", "fa", "fr", "he", "hi", "id", "it", "ja", "ko", "nl", "pl", "pt", "ru", "sv",
-        "tr",
-        "uk", "zh-Hans", "zh-Hant",
-    ].map { code in
-        let native = Locale(identifier: code).localizedString(forIdentifier: code) ?? code
-        return (
-            Locale(identifier: "en").localizedString(forIdentifier: code) ?? code,
-            native.prefix(1).uppercased(with: Locale(identifier: code)) + native.dropFirst()
-        )
-    }
-    .sorted { $0.name < $1.name }
+    public static let languages: [(name: String, native: String)] =
+        "ar de el en es fa fr he hi id it ja ko nl pl pt ru sv tr uk zh-Hans zh-Hant".split(separator: " ").map {
+            let code = String($0)
+            let native = Locale(identifier: code).localizedString(forIdentifier: code) ?? code
+            return (
+                Locale(identifier: "en").localizedString(forIdentifier: code) ?? code,
+                native.prefix(1).uppercased(with: Locale(identifier: code)) + native.dropFirst()
+            )
+        }
+        .sorted { $0.name < $1.name }
 
     static var systemLanguage: String {
         let code = Locale.current.language.languageCode?.identifier ?? "en"

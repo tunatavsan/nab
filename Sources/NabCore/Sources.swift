@@ -7,11 +7,32 @@ public protocol SourceProvider: Sendable {
     /// Returns the source's stable id for `url`, or nil when this provider does not handle it.
     func identify(_ url: URL) -> String?
     func fetch(_ url: URL) async throws -> Capture
+    /// Cover images for an item, largest first, known from its id alone so they show before the fetch ends.
+    func covers(forID id: String) -> [URL]
+    /// A link that opens the item at a moment.
+    func link(to capture: Capture, at seconds: TimeInterval) -> URL
+}
+
+extension SourceProvider {
+    public func covers(forID id: String) -> [URL] { [] }
+    public func link(to capture: Capture, at seconds: TimeInterval) -> URL { capture.url }
 }
 
 public struct SourceRegistry: Sendable {
     public let providers: [any SourceProvider]
     public init(_ providers: [any SourceProvider]) { self.providers = providers }
+
+    public func provider(for kind: SourceKind) -> (any SourceProvider)? { providers.first { $0.kind == kind } }
+
+    /// An entry's cover images, largest first: the source's own, then the one its fetch found.
+    public func covers(for entry: Entry) -> [URL] {
+        let own = provider(for: entry.source)?.covers(forID: entry.sourceID) ?? []
+        return own + [entry.capture?.thumbnailURL].compactMap { $0 }.filter { !own.contains($0) }
+    }
+
+    public func link(to capture: Capture, at seconds: TimeInterval) -> URL {
+        provider(for: capture.source)?.link(to: capture, at: seconds) ?? capture.url
+    }
 
     public func match(_ url: URL) -> (provider: any SourceProvider, entryID: String)? {
         for provider in providers {

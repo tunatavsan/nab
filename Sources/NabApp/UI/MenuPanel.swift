@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 import NabCore
 import SwiftUI
 
@@ -85,10 +86,10 @@ final class StatusController {
             } as Any)
         monitors.append(
             NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-                if event.keyCode == 53 {
+                if event.keyCode == UInt16(kVK_Escape) {
                     self?.close()
                     return nil
-                }  // Escape
+                }
                 return event
             } as Any)
     }
@@ -114,7 +115,7 @@ final class StatusController {
             corners.move(to: NSPoint(x: 15, y: 7.5))
             corners.line(to: NSPoint(x: 15, y: 3))
             corners.line(to: NSPoint(x: 10.5, y: 3))
-            NSColor.black.set()
+            Palette.nsTemplateInk.set()
             corners.stroke()
             NSBezierPath(ovalIn: NSRect(x: 6.6, y: 6.6, width: 4.8, height: 4.8)).fill()
             return true
@@ -123,7 +124,7 @@ final class StatusController {
         return image
     }()
 
-    /// A 6 pt light in the icon's top-right corner: ember and breathing while fetches run, a short
+    /// A 6 pt light in the icon's top-right corner: orange and pulsing while fetches run, a short
     /// green flash when the last one lands.
     private func installLight() {
         guard let button = item.button else { return }
@@ -142,23 +143,22 @@ final class StatusController {
         CATransaction.setDisableActions(true)
         if inFlight > 0 {
             light.backgroundColor = Palette.nsAccent.cgColor
+            let still = LightMotion.reduceMotion
             if light.opacity == 0 {
                 light.opacity = 1
-                let pop = WindowMotion.spring(response: WindowMotion.popResponse, damping: WindowMotion.popDamping)
-                pop.keyPath = "transform.scale"
-                pop.fromValue = 0.2
-                pop.toValue = 1
-                light.add(pop, forKey: "pop")
+                if !still {
+                    let pop = WindowMotion.layerSpring(
+                        response: WindowMotion.popResponse, damping: WindowMotion.popDamping)
+                    pop.keyPath = "transform.scale"
+                    pop.fromValue = 0.2
+                    pop.toValue = 1
+                    light.add(pop, forKey: "pop")
+                }
             }
-            if light.animation(forKey: "breathe") == nil {
-                let breathe = CABasicAnimation(keyPath: "opacity")
-                breathe.fromValue = 1
-                breathe.toValue = 0.35
-                breathe.duration = 0.7
-                breathe.autoreverses = true
-                breathe.repeatCount = .infinity
-                breathe.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 60, preferred: 60)
-                light.add(breathe, forKey: "breathe")
+            if still {
+                light.removeAnimation(forKey: "breathe")
+            } else if light.animation(forKey: "breathe") == nil {
+                light.add(LightMotion.breathe(), forKey: "breathe")
             }
         } else if lastInFlight > 0 {
             light.removeAnimation(forKey: "breathe")
@@ -204,7 +204,8 @@ private struct MenuPanelView: View {
     private var tools: some View {
         HStack(spacing: 0) {
             ToolTile(
-                symbol: "viewfinder", title: "Front Tab", shortcut: "⌃⌥N", hovered: $hoveredTool,
+                symbol: "viewfinder", title: "Front Tab", shortcut: center.shortcutAvailable ? "⌃⌥N" : "no shortcut",
+                hovered: $hoveredTool,
                 action: actions.nabFrontTab)
             ToolTile(
                 symbol: "clipboard", title: "Paste", shortcut: "links", hovered: $hoveredTool,
@@ -301,7 +302,10 @@ private struct TrayCell: View {
 
     private var empty: some View {
         VStack(spacing: Space.xs) {
-            Text("Press ⌃⌥N with a YouTube video in front.")
+            Text(
+                center.shortcutAvailable
+                    ? "Press ⌃⌥N with a YouTube video in front."
+                    : "⌃⌥N is in use by another app. Use Front Tab above.")
             Text("Nabbed videos gather here, ready to copy as one context.")
         }
         .font(Typeface.meta)
@@ -334,7 +338,7 @@ private struct TrayRow: View {
                         .lineLimit(1)
                     Text(entry.metaLine)
                         .font(Typeface.meta)
-                        .foregroundStyle(entry.phase == .failed ? Palette.accent : Palette.inkTertiary)
+                        .foregroundStyle(entry.phase == .failed ? Palette.error : Palette.inkTertiary)
                         .lineLimit(1)
                         .contentTransition(.opacity)
                 }
@@ -375,7 +379,7 @@ private struct SecondaryIconButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.system(size: 15, weight: .semibold))
+                .font(Typeface.iconButton)
                 .foregroundStyle(enabled ? (hovering ? Palette.accent : Palette.ink) : Palette.inkTertiary)
                 .scaleEffect(hovering && enabled ? 1.1 : 1)
                 .frame(width: PanelMetrics.buttonHeight, height: PanelMetrics.buttonHeight)

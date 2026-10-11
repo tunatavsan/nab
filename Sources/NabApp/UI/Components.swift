@@ -42,6 +42,7 @@ struct ToolTile: View {
     var enabled = true
     @Binding var hovered: String?
     let action: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var isHovered: Bool { hovered == title }
     private var dimmed: Bool { hovered != nil && !isHovered }
@@ -50,11 +51,11 @@ struct ToolTile: View {
         Button(action: action) {
             VStack(spacing: 5) {
                 Image(systemName: symbol)
-                    .font(.system(size: 18, weight: .regular))
+                    .font(Typeface.iconTool)
                     .frame(width: 26, height: 26)
-                    .scaleEffect(isHovered ? 1.16 : 1)
-                    .offset(y: isHovered ? -2 : 0)
-                    .shadow(color: Palette.ink.opacity(isHovered ? 0.45 : 0), radius: 7)
+                    .scaleEffect(isHovered && !reduceMotion ? 1.16 : 1)
+                    .offset(y: isHovered && !reduceMotion ? -2 : 0)
+                    .shadow(color: isHovered ? Palette.glow : .clear, radius: 7)
                 ZStack {
                     Text(title)
                         .font(Typeface.label)
@@ -78,12 +79,14 @@ struct ToolTile: View {
         .disabled(!enabled)
         .opacity(enabled ? (dimmed ? 0.5 : 1) : 0.35)
         .onHover { over in
-            withAnimation(Motion.lift) { hovered = over ? title : (hovered == title ? nil : hovered) }
+            withAnimation(Motion.resolved(Motion.lift, reduceMotion: reduceMotion)) {
+                hovered = over ? title : (hovered == title ? nil : hovered)
+            }
         }
     }
 }
 
-/// The full-width capsule for the one thing the panel is for.
+/// The full-width capsule for the panel's main action.
 struct PrimaryButton: View {
     let title: String
     let symbol: String
@@ -91,13 +94,14 @@ struct PrimaryButton: View {
     var enabled = true
     let action: () -> Void
     @State private var hovering = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: 7) {
                 Image(systemName: symbol)
-                    .font(.system(size: 14, weight: .semibold))
-                    .scaleEffect(hovering ? 1.12 : 1)
+                    .font(Typeface.iconAction)
+                    .scaleEffect(hovering && !reduceMotion ? 1.12 : 1)
                     .contentTransition(.symbolEffect(.replace))
                 Text(title).font(Typeface.button)
                     .contentTransition(.opacity)
@@ -108,9 +112,9 @@ struct PrimaryButton: View {
             }
             .foregroundStyle(Palette.onAccent)
             .frame(maxWidth: .infinity, minHeight: PanelMetrics.buttonHeight)
-            .background(Capsule().fill(Palette.accent.opacity(enabled ? (hovering ? 1 : 0.92) : 0.5)))
-            .overlay(Capsule().strokeBorder(.white.opacity(0.18), lineWidth: 1))
-            .shadow(color: Palette.accent.opacity(hovering && enabled ? 0.45 : 0), radius: 10, y: 2)
+            .background(Capsule().fill(enabled ? (hovering ? Palette.accent : Palette.accentIdle) : Palette.accentDim))
+            .overlay(Capsule().strokeBorder(Palette.onAccentRim, lineWidth: 1))
+            .shadow(color: hovering && enabled ? Palette.accentGlow : .clear, radius: 10, y: 2)
             .contentShape(.capsule)
         }
         .buttonStyle(PressableStyle(scale: 0.97))
@@ -129,7 +133,7 @@ struct IconButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.system(size: 13, weight: .semibold))
+                .font(Typeface.icon)
                 .foregroundStyle(hovering ? Palette.ink : Palette.inkSecondary)
                 .frame(width: 30, height: 30)
                 .background(hovering ? Palette.hover : .clear, in: .circle)
@@ -202,12 +206,11 @@ struct Thumb: View {
             }
             switch entry.phase {
             case .fetching:
-                Color.black.opacity(0.45)
-                ProgressView().controlSize(.mini).tint(.white)
+                Palette.scrim
+                ProgressView().controlSize(.mini).tint(Palette.onScrim)
             case .failed:
-                Color.black.opacity(0.55)
-                Image(systemName: "exclamationmark").font(.system(size: 12, weight: .bold)).foregroundStyle(
-                    Palette.accent)
+                Palette.scrimStrong
+                Image(systemName: "exclamationmark").font(Typeface.iconBadge).foregroundStyle(Palette.error)
             case .ready:
                 EmptyView()
             }
@@ -226,13 +229,9 @@ struct PhaseMark: View {
             switch phase {
             case .fetching:
                 Circle().fill(Palette.accent).frame(width: 6, height: 6)
-                    .phaseAnimator([1.0, 0.35]) { dot, value in
-                        dot.opacity(value)
-                    } animation: { _ in
-                        .easeInOut(duration: 0.7)
-                    }
+                    .pulsing(low: 0.35, duration: 0.7)
             case .failed:
-                Circle().strokeBorder(Palette.accent, lineWidth: 1.5).frame(width: 7, height: 7)
+                Circle().strokeBorder(Palette.error, lineWidth: 1.5).frame(width: 7, height: 7)
             case .ready:
                 Color.clear
             }

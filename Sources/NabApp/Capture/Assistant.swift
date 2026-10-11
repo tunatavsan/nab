@@ -34,6 +34,7 @@ final class Assistant {
 
     /// Read once from the keychain, then from memory, so views can check it on every render.
     func key(for kind: ProviderKind) -> String {
+        // Reading this registers an observation dependency, so views re-read the key after `setKey` bumps it.
         _ = keyRevision
         if let cached = keyCache[kind] { return cached }
         let value = Keychain.key(for: kind) ?? ""
@@ -71,10 +72,12 @@ final class Assistant {
         if conversation(entryIDs)?.messages.isEmpty ?? true { summarize(entryIDs) }
     }
 
-    func ask(_ text: String, about entryIDs: [String]) {
+    /// Returns whether the question went out; it does not when the provider still needs setting up.
+    @discardableResult
+    func ask(_ text: String, about entryIDs: [String]) -> Bool {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
-        send(ChatMessage(role: .user, text: text), to: entryIDs)
+        guard !text.isEmpty else { return false }
+        return send(ChatMessage(role: .user, text: text), to: entryIDs)
     }
 
     /// Asks the last question again, replacing its answer.
@@ -98,18 +101,25 @@ final class Assistant {
         tasks[id]?.cancel()
         conversations[id] = Conversation(entryIDs: entryIDs)
         let store = center.store
-        Task { await store.deleteConversation(id) }
+        Task { [center] in
+            do {
+                try await store.deleteConversation(id)
+            } catch {
+                center.report(error, while: "clearing the chat")
+            }
+        }
     }
 
-    private func send(_ question: ChatMessage, to entryIDs: [String]) {
+    @discardableResult
+    private func send(_ question: ChatMessage, to entryIDs: [String]) -> Bool {
         let id = Conversation.id(for: entryIDs)
-        guard !streaming.contains(id) else { return }
+        guard !streaming.contains(id) else { return false }
         let captures = entryIDs.compactMap { center.entry($0)?.capture }
-        guard !captures.isEmpty else { return }
+        guard !captures.isEmpty else { return false }
         let client = client
         if client.problem != nil {
             openSettings()
-            return
+            return false
         }
 
         var conversation = conversations[id] ?? Conversation(entryIDs: entryIDs)
@@ -145,6 +155,7 @@ final class Assistant {
                 id, answerID: answer.id, text: text, failure: failure, cancelled: Task.isCancelled,
                 summaryOf: question.isSummaryRequest && entryIDs.count == 1 ? entryIDs[0] : nil)
         }
+        return true
     }
 
     private func update(_ id: String, _ messageID: UUID, _ change: (inout ChatMessage) -> Void) {
@@ -173,7 +184,13 @@ final class Assistant {
         conversation.updatedAt = .now
         conversations[id] = conversation
         let store = center.store
-        Task { await store.save(conversation) }
+        Task { [center] in
+            do {
+                try await store.save(conversation)
+            } catch {
+                center.report(error, while: "saving the chat")
+            }
+        }
 
         // A finished summary of one video also travels with it in copied context packs.
         if let entryID, failure == nil, !cancelled, !text.isEmpty,

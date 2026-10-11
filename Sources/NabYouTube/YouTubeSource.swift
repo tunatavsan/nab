@@ -16,6 +16,16 @@ public struct YouTubeSource: SourceProvider {
         self.session = session
     }
 
+    public func covers(forID id: String) -> [URL] {
+        ["maxresdefault", "hqdefault", "mqdefault"].compactMap { URL(string: "https://i.ytimg.com/vi/\(id)/\($0).jpg") }
+    }
+
+    public func link(to capture: Capture, at seconds: TimeInterval) -> URL {
+        var parts = URLComponents(string: "https://www.youtube.com/watch")
+        parts?.queryItems = [.init(name: "v", value: capture.sourceID), .init(name: "t", value: "\(Int(seconds))s")]
+        return parts?.url ?? capture.url
+    }
+
     public func identify(_ url: URL) -> String? { YouTubeURL.videoID(in: url) }
 
     public func fetch(_ url: URL) async throws -> Capture {
@@ -83,7 +93,8 @@ public struct YouTubeSource: SourceProvider {
     private func transcript(_ track: Player.Track) async throws -> Transcript {
         guard var parts = URLComponents(string: track.baseUrl) else { throw NabError("Caption link is malformed.") }
         parts.queryItems = (parts.queryItems ?? []).filter { $0.name != "fmt" } + [.init(name: "fmt", value: "json3")]
-        var request = URLRequest(url: parts.url!)
+        guard let url = parts.url else { throw NabError("Caption link is malformed.") }
+        var request = URLRequest(url: url)
         request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
         let (data, response) = try await hedged(request)
         try Self.check(response, "captions")

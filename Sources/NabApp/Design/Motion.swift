@@ -1,3 +1,4 @@
+import AppKit
 import QuartzCore
 import SwiftUI
 
@@ -6,7 +7,7 @@ import SwiftUI
 // their velocity when interrupted.
 
 enum Motion {
-    /// Hover lifts on tiles and icons: quick, with a little life.
+    /// Hover lifts on tiles and icons: quick, with a slight overshoot.
     static let lift = Animation.spring(response: 0.32, dampingFraction: 0.62)
     /// Buttons, links, state flips.
     static let snap = Animation.spring(response: 0.3, dampingFraction: 0.7)
@@ -14,6 +15,9 @@ enum Motion {
     static let press = Animation.spring(response: 0.2, dampingFraction: 0.7)
     /// Rows arriving, content swapping, the panel growing.
     static let settle = Animation.spring(response: 0.42, dampingFraction: 0.84)
+
+    /// Fades a search hit's highlight back out.
+    static let highlightFade = Animation.easeOut(duration: 0.8)
 
     /// `animation`, or a short fade when the user has asked for reduced motion.
     static func resolved(_ animation: Animation, reduceMotion: Bool) -> Animation {
@@ -40,7 +44,7 @@ enum WindowMotion {
     static let drop: CGFloat = 8
     static let frameRate = CAFrameRateRange(minimum: 80, maximum: 120, preferred: 120)
 
-    static func spring(response: Double, damping: Double) -> CASpringAnimation {
+    static func layerSpring(response: Double, damping: Double) -> CASpringAnimation {
         let spring = CASpringAnimation(keyPath: "transform")
         spring.mass = 1
         spring.stiffness = pow(2 * .pi / response, 2)
@@ -50,11 +54,54 @@ enum WindowMotion {
         return spring
     }
 
-    /// Scale around the top centre plus the drop, for a layer whose origin is bottom-left.
+    /// Scale around the top center plus the drop, for a layer whose origin is bottom-left.
     static func collapsed(size: CGSize) -> CATransform3D {
         let s = startScale
         let t = CATransform3DMakeTranslation((1 - s) * size.width / 2, (1 - s) * size.height + drop, 0)
         return CATransform3DScale(t, s, s, 1)
+    }
+}
+
+/// Loops an opacity pulse for work in flight. With Reduce Motion on, the view stays still and fully lit.
+private struct Pulse: ViewModifier {
+    let low: Double
+    let duration: Double
+    let delay: Double
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        if reduceMotion {
+            content
+        } else {
+            content.phaseAnimator([1.0, low]) { view, value in
+                view.opacity(value)
+            } animation: { _ in
+                .easeInOut(duration: duration).delay(delay)
+            }
+        }
+    }
+}
+
+extension View {
+    func pulsing(low: Double, duration: Double, delay: Double = 0) -> some View {
+        modifier(Pulse(low: low, duration: duration, delay: delay))
+    }
+}
+
+/// The status item's light, which lives in Core Animation rather than SwiftUI.
+@MainActor
+enum LightMotion {
+    static var reduceMotion: Bool { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
+
+    static func breathe() -> CABasicAnimation {
+        let breathe = CABasicAnimation(keyPath: "opacity")
+        breathe.fromValue = 1
+        breathe.toValue = 0.35
+        breathe.duration = 0.7
+        breathe.autoreverses = true
+        breathe.repeatCount = .infinity
+        breathe.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 60, preferred: 60)
+        return breathe
     }
 }
 

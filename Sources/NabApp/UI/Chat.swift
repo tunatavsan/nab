@@ -70,7 +70,7 @@ struct ChatView: View {
         let problem = assistant.client.problem
         return VStack(spacing: Space.l) {
             Image(systemName: "sparkles")
-                .font(.system(size: 20, weight: .semibold))
+                .font(Typeface.iconHero)
                 .foregroundStyle(Palette.accent)
                 .frame(width: 48, height: 48)
                 .background(Palette.accentWash, in: .circle)
@@ -172,7 +172,7 @@ struct ChatView: View {
         .glassEffect(.regular, in: .rect(cornerRadius: Radius.composer, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: Radius.composer, style: .continuous).strokeBorder(
-                composing ? Palette.accent.opacity(0.5) : Palette.hairline)
+                composing ? Palette.accentDim : Palette.hairline)
         )
         .animation(Motion.snap, value: composing)
         .padding(Space.m)
@@ -182,8 +182,7 @@ struct ChatView: View {
         guard !assistant.isStreaming(entryIDs), !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return
         }
-        assistant.ask(draft, about: entryIDs)
-        draft = ""
+        if assistant.ask(draft, about: entryIDs) { draft = "" }
     }
 
     /// Links in an answer that is still being written arrive here. Once an answer is selectable, macOS sends its
@@ -195,7 +194,7 @@ struct ChatView: View {
     }
 }
 
-/// One turn. Questions sit right in an ember wash; answers run full width as Markdown.
+/// One turn. Questions sit on the right in an accent wash; answers run full width as Markdown.
 private struct MessageView: View {
     let message: ChatMessage
     let isLast: Bool
@@ -271,7 +270,7 @@ private struct MessageView: View {
                 Image(systemName: "exclamationmark.triangle.fill")
             }
             .font(Typeface.body)
-            .foregroundStyle(Palette.accent)
+            .foregroundStyle(Palette.error)
             if isLast {
                 HStack(spacing: Space.s) {
                     Button("Try Again", systemImage: "arrow.clockwise") { assistant.regenerate(entryIDs) }
@@ -299,7 +298,7 @@ private struct ProviderMenu: View {
         } label: {
             HStack(spacing: 4) {
                 Text(assistant.client.modelLabel).lineLimit(1)
-                Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold))
+                Image(systemName: "chevron.down").font(Typeface.iconMicro)
             }
             .font(Typeface.label)
             .foregroundStyle(Palette.inkSecondary)
@@ -323,7 +322,7 @@ private struct SuggestionRow: View {
             HStack(spacing: Space.s) {
                 Text(text).font(Typeface.body).multilineTextAlignment(.leading)
                 Spacer(minLength: Space.s)
-                Image(systemName: "arrow.up.right").font(.system(size: 10, weight: .bold))
+                Image(systemName: "arrow.up.right").font(Typeface.iconSmall)
                     .opacity(hovering ? 1 : 0)
                     .offset(x: hovering ? 0 : -3)
             }
@@ -347,11 +346,11 @@ private struct SendButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: stop ? "stop.fill" : "arrow.up")
-                .font(.system(size: stop ? 10 : 13, weight: .bold))
+                .font(stop ? Typeface.iconSmall : Typeface.iconSend)
                 .contentTransition(.symbolEffect(.replace))
                 .foregroundStyle(stop ? Palette.ink : Palette.onAccent)
                 .frame(width: 28, height: 28)
-                .background(stop ? Palette.pressed : Palette.accent.opacity(enabled ? 1 : 0.35), in: .circle)
+                .background(stop ? Palette.pressed : (enabled ? Palette.accent : Palette.accentFaint), in: .circle)
                 .contentShape(.circle)
         }
         .buttonStyle(PressableStyle())
@@ -388,11 +387,7 @@ private struct ThinkingDots: View {
                     Circle()
                         .fill(Palette.accent)
                         .frame(width: 5, height: 5)
-                        .phaseAnimator([0.25, 1.0]) { dot, value in
-                            dot.opacity(value)
-                        } animation: { _ in
-                            .easeInOut(duration: 0.55).delay(Double(index) * 0.18)
-                        }
+                        .pulsing(low: 0.25, duration: 0.55, delay: Double(index) * 0.18)
                 }
             }
             Text(label + "…").font(Typeface.meta).foregroundStyle(Palette.inkTertiary)

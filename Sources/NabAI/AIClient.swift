@@ -6,10 +6,12 @@ import Synchronization
 public struct AIClient: Sendable {
     public let settings: AISettings
     public let apiKey: String?
+    private let session: URLSession
 
-    public init(settings: AISettings, apiKey: String?) {
+    public init(settings: AISettings, apiKey: String?, session: URLSession = .shared) {
         self.settings = settings
         self.apiKey = apiKey
+        self.session = session
     }
 
     /// The model name stored with each answer.
@@ -95,7 +97,7 @@ public struct AIClient: Sendable {
         guard !settings.kind.isCLI else { return [] }
         var request = URLRequest(url: try endpoint("/models"))
         authorize(&request)
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await session.data(for: request)
         try Self.check(response, data)
         struct List: Decodable {
             struct Model: Decodable { let id: String }
@@ -178,7 +180,7 @@ public struct AIClient: Sendable {
     private func events(_ request: URLRequest, handle: ([String: Any]) throws -> Void) async throws {
         var request = request
         request.timeoutInterval = 300
-        let (bytes, response) = try await URLSession.shared.bytes(for: request)
+        let (bytes, response) = try await session.bytes(for: request)
         if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
             var body = Data()
             for try await byte in bytes.prefix(4096) { body.append(byte) }

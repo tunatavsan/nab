@@ -48,13 +48,6 @@ public struct Capture: Codable, Sendable, Hashable {
         self.chapters = chapters
         self.transcript = transcript
     }
-
-    /// A link that opens the source at a moment, when the source supports it.
-    public func url(at seconds: TimeInterval) -> URL {
-        guard source == .youtube, var parts = URLComponents(string: "https://www.youtube.com/watch") else { return url }
-        parts.queryItems = [.init(name: "v", value: sourceID), .init(name: "t", value: "\(Int(seconds))s")]
-        return parts.url ?? url
-    }
 }
 
 public struct Chapter: Codable, Sendable, Hashable {

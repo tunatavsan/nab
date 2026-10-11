@@ -50,7 +50,7 @@ func render(px: Int) -> Data {
 
     let body = squircle(CGRect(x: 100, y: 100, width: 824, height: 824), radius: 185)
 
-    // Drop shadow
+    // The icon sits on a transparent canvas, so the shadow is drawn into the image.
     ctx.saveGState()
     ctx.setShadow(offset: CGSize(width: 0, height: -10), blur: 20, color: rgb(0x000000, 0.30))
     ctx.setFillColor(rgb(0x121417))
@@ -58,13 +58,12 @@ func render(px: Int) -> Data {
     ctx.fillPath()
     ctx.restoreGState()
 
-    // Gradient fill
     ctx.saveGState()
     ctx.addPath(body)
     ctx.clip()
     let grad = CGGradient(colorsSpace: cs, colors: [rgb(0x2B2E34), rgb(0x121417)] as CFArray, locations: [0, 1])!
     ctx.drawLinearGradient(grad, start: CGPoint(x: 0, y: 924), end: CGPoint(x: 0, y: 100), options: [])
-    // 2 px inner rim
+    // A faint rim keeps the dark body from vanishing against dark backgrounds.
     ctx.setStrokeColor(rgb(0xFFFFFF, 0.12))
     ctx.setLineWidth(4)
     ctx.addPath(body)

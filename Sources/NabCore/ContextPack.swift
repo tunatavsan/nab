@@ -10,7 +10,7 @@ public enum ContextPack {
             out += "Index:\n"
             for (i, c) in captures.enumerated() {
                 out +=
-                    "\(i + 1). \(c.title)\(c.author.map { " — \($0)" } ?? "")\(c.duration.map { " (\(Timecode.string($0)))" } ?? "")\n"
+                    "\(i + 1). \(inert(c.title))\(c.author.map { " — \(inert($0))" } ?? "")\(c.duration.map { " (\(Timecode.string($0)))" } ?? "")\n"
             }
             out += "\n"
         }
@@ -21,10 +21,10 @@ public enum ContextPack {
 
     public static func source(_ c: Capture) -> String {
         var out = "<source type=\"\(c.source.rawValue)\" id=\"\(c.sourceID)\" url=\"\(c.url.absoluteString)\">\n"
-        out += "# \(c.title)\n\n"
+        out += "# \(inert(c.title))\n\n"
         if let cover = c.thumbnailURL { out += "![Cover](\(cover.absoluteString))\n\n" }
         var facts: [String] = []
-        if let author = c.author { facts.append("Channel: \(author)") }
+        if let author = c.author { facts.append("Channel: \(inert(author))") }
         if let duration = c.duration { facts.append("Duration: \(Timecode.string(duration))") }
         if let views = c.viewCount { facts.append("Views: \(views.formatted())") }
         if let t = c.transcript {
@@ -35,28 +35,34 @@ public enum ContextPack {
         out += facts.map { "- \($0)" }.joined(separator: "\n") + "\n"
 
         if let ai = c.aiSummary?.trimmingCharacters(in: .whitespacesAndNewlines), !ai.isEmpty {
-            out += "\n## Summary\(c.aiModel.map { " (by \($0))" } ?? "")\n\(ai)\n"
+            out += "\n## Summary\(c.aiModel.map { " (by \(inert($0)))" } ?? "")\n\(inert(ai))\n"
         }
         if !c.chapters.isEmpty {
             out += "\n## Chapters\n"
-            out += c.chapters.map { "[\(Timecode.string($0.start))] \($0.title)" }.joined(separator: "\n") + "\n"
+            out += c.chapters.map { "[\(Timecode.string($0.start))] \(inert($0.title))" }.joined(separator: "\n") + "\n"
         }
         if let summary = c.summary?.trimmingCharacters(in: .whitespacesAndNewlines), !summary.isEmpty {
-            out += "\n## Description\n\(summary)\n"
+            out += "\n## Description\n\(inert(summary))\n"
         }
         if let transcript = c.transcript {
             out += "\n## Transcript\n"
             var lastChapter: String?
             for p in transcript.paragraphs(chapters: c.chapters) {
                 if let chapter = p.chapter, chapter != lastChapter {
-                    out += "\n### \(chapter)\n"
+                    out += "\n### \(inert(chapter))\n"
                     lastChapter = chapter
                 }
-                out += "[\(Timecode.string(p.start))] \(p.text)\n"
+                out += "[\(Timecode.string(p.start))] \(inert(p.text))\n"
             }
         }
         out += "</source>\n"
         return out
+    }
+
+    /// Text that comes from a video (title, description, captions, an earlier answer) cannot open or close the
+    /// tags that frame it, so it cannot pose as another source or end the pack early.
+    static func inert(_ text: String) -> String {
+        text.replacing(#/<(/?)(source|nab_context)\b/#.ignoresCase()) { "&lt;\($0.output.1)\($0.output.2)" }
     }
 
     /// Rough size for display; models differ, so it is labelled as an estimate wherever shown.

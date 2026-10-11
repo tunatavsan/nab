@@ -1,6 +1,5 @@
 import AppKit
 import NabCore
-import NabYouTube
 import Observation
 
 /// Owns the library entries, the fetches in flight, and the capture toast.
@@ -23,10 +22,15 @@ final class CaptureCenter {
     var tray: [Entry] { entries.filter(\.inTray) }
     var trayCaptures: [Capture] { tray.compactMap(\.capture) }
 
-    let registry = SourceRegistry([YouTubeSource()])
+    let registry = SourceRegistry.standard
     let store = LibraryStore()
     private let gate = Gate(limit: 6)
     private var toastDismissal: Task<Void, Never>?
+    private var fetching: Set<String> = []
+    /// False when the system refused the global shortcut, so the interface stops advertising it.
+    var shortcutAvailable = true
+    /// How long `nab://chat` waits for transcripts before it summarizes what has arrived.
+    static let fetchWaitTimeout: Duration = .seconds(15)
 
     func load() async {
         let saved = await store.loadAll()
@@ -105,9 +109,13 @@ final class CaptureCenter {
         entries.removeAll { ids.contains($0.id) }
         let store = store
         Task {
-            for id in ids {
-                await store.delete(id)
-                await store.deleteConversation(id)
+            do {
+                for id in ids {
+                    try await store.delete(id)
+                    try await store.deleteConversation(id)
+                }
+            } catch {
+                report(error, while: "removing from the library")
             }
         }
     }
@@ -149,6 +157,7 @@ final class CaptureCenter {
         guard let entry = entry(id), let provider = registry.match(entry.url)?.provider else { return }
         let url = entry.url
         let gate = gate
+        fetching.insert(id)
         Task {
             // Without this, App Nap throttles a menu bar app's network work while it sits in the background.
             let activity = ProcessInfo.processInfo.beginActivity(
@@ -159,6 +168,17 @@ final class CaptureCenter {
                 result = .failure(error)
             }
             finish(id, result)
+            fetching.remove(id)
+        }
+    }
+
+    /// Returns when the fetches for `ids` have finished, or after `timeout`, whichever comes first.
+    func waitForFetches(_ ids: [String], timeout: Duration = CaptureCenter.fetchWaitTimeout) async {
+        // Polls rather than awaiting the fetch tasks: awaiting a task's value ignores cancellation, so a timeout
+        // could not cut it short.
+        let deadline = ContinuousClock.now + timeout
+        while ids.contains(where: fetching.contains), ContinuousClock.now < deadline, !Task.isCancelled {
+            try? await Task.sleep(for: .milliseconds(100))
         }
     }
 
@@ -190,7 +210,20 @@ final class CaptureCenter {
 
     private func persist(_ entry: Entry) {
         let store = store
-        Task { await store.save(entry) }
+        Task {
+            do {
+                try await store.save(entry)
+            } catch {
+                report(error, while: "saving \(entry.title)")
+            }
+        }
+    }
+
+    /// Shows a failure to read or write the library, which the user would otherwise not notice until the
+    /// data is missing.
+    func report(_ error: any Error, while action: String) {
+        NSLog("Nab: failed \(action): \(error)")
+        show(.init(tone: .failed, title: "Couldn't finish \(action)", detail: error.localizedDescription))
     }
 
     // MARK: Toast

@@ -7,6 +7,7 @@ import SwiftUI
 /// Every provider Nab can talk to, the prompts it sends, and the app's own switches.
 struct SettingsView: View {
     @Bindable var assistant: Assistant
+    let shortcutAvailable: Bool
     @State private var key = ""
     /// The provider the key field belongs to. It trails `kind` until the typed key is saved.
     @State private var keyKind = ProviderKind.claudeCLI
@@ -122,7 +123,13 @@ struct SettingsView: View {
             Section("General") {
                 Toggle("Open at login", isOn: $openAtLogin)
                 if let loginError { Text(loginError).foregroundStyle(Palette.error).font(.callout) }
-                LabeledContent("Nab the front tab") { Text("⌃⌥N").font(Typeface.mono) }
+                LabeledContent("Nab the front tab") {
+                    if shortcutAvailable {
+                        Text("⌃⌥N").font(Typeface.mono)
+                    } else {
+                        Text("⌃⌥N is in use by another app").foregroundStyle(Palette.error)
+                    }
+                }
                 LabeledContent("Library and chats") {
                     Button("Show in Finder") {
                         NSWorkspace.shared.activateFileViewerSelecting([
@@ -272,7 +279,7 @@ private struct PromptEditor: View {
                 .scrollContentBackground(.hidden)
                 .padding(6)
                 .frame(minHeight: 130)
-                .background(.quaternary.opacity(0.4), in: .rect(cornerRadius: Radius.thumb))
+                .background(Palette.field, in: .rect(cornerRadius: Radius.thumb))
             Text(note).font(.callout).foregroundStyle(.secondary)
         }
     }

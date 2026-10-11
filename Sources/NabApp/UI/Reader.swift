@@ -38,7 +38,7 @@ struct ReaderView: View {
                 withAnimation(Motion.snap) { highlighted = target }
                 Task {
                     try? await Task.sleep(for: .seconds(2.2))
-                    if highlighted == target { withAnimation(.easeOut(duration: 0.8)) { highlighted = nil } }
+                    if highlighted == target { withAnimation(Motion.highlightFade) { highlighted = nil } }
                 }
             }
         }
@@ -49,7 +49,7 @@ struct ReaderView: View {
             Cover(entry: entry)
                 .padding(.bottom, Space.s)
             SectionLabel(
-                [entry.capture?.source.rawValue ?? "Link", entry.capture?.author].compactMap { $0 }.joined(
+                [entry.capture?.source.displayName ?? "Link", entry.capture?.author].compactMap { $0 }.joined(
                     separator: " · "))
             Text(entry.title)
                 .font(Typeface.display)
@@ -167,7 +167,7 @@ struct ReaderView: View {
         VStack(alignment: .leading, spacing: Space.m) {
             Text(entry.failure ?? "Something went wrong.")
                 .font(Typeface.reading)
-                .foregroundStyle(Palette.accent)
+                .foregroundStyle(Palette.error)
             Button("Try Again", systemImage: "arrow.clockwise") { model.center.retry(entry.id) }
                 .buttonStyle(.glass)
         }
@@ -274,8 +274,8 @@ private struct Cover: View {
                 }
                 .overlay {
                     Image(systemName: "play.fill")
-                        .font(.system(size: 20, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .font(Typeface.iconHero)
+                        .foregroundStyle(Palette.onScrim)
                         .frame(width: 56, height: 56)
                         .glassEffect(.regular, in: .circle)
                         .opacity(hovering ? 1 : 0)
@@ -312,14 +312,5 @@ enum CoverCache {
             return image
         }
         return nil
-    }
-}
-
-extension Entry {
-    /// Largest first.
-    var coverURLs: [URL] {
-        guard id.hasPrefix("youtube:") else { return [capture?.thumbnailURL].compactMap { $0 } }
-        let video = id.dropFirst("youtube:".count)
-        return ["maxresdefault", "hqdefault"].compactMap { URL(string: "https://i.ytimg.com/vi/\(video)/\($0).jpg") }
     }
 }

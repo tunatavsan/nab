@@ -2,7 +2,7 @@ import Foundation
 import NabCore
 import NabYouTube
 
-// nab <link>... — fetches every link in parallel and prints one AI-ready context pack to stdout.
+// nab <link>... — fetches every link in parallel and prints one context pack to stdout.
 // The same core the app uses, so agents can read videos without the UI.
 
 let arguments = Array(CommandLine.arguments.dropFirst())
@@ -13,7 +13,7 @@ if input.isEmpty || arguments.contains("--help") {
     print(
         """
         usage: nab [--json] <link>...
-          Fetches each link's details and transcript in parallel and prints an AI-ready context pack.
+          Fetches each link's details and transcript in parallel and prints a context pack for AI.
           --json   print captures as JSON instead
         """)
     exit(input.isEmpty && !arguments.contains("--help") ? 64 : 0)

@@ -59,7 +59,7 @@ private struct ToastCard: View {
                         Color.clear
                     }
                 } else {
-                    Image(systemName: "viewfinder").font(.system(size: 16)).foregroundStyle(Palette.inkSecondary)
+                    Image(systemName: "viewfinder").font(Typeface.iconLead).foregroundStyle(Palette.inkSecondary)
                 }
             }
             .frame(width: 64, height: 36)
@@ -73,7 +73,7 @@ private struct ToastCard: View {
                 if !toast.detail.isEmpty {
                     Text(toast.detail)
                         .font(Typeface.meta)
-                        .foregroundStyle(toast.tone == .failed ? Palette.accent : Palette.inkTertiary)
+                        .foregroundStyle(toast.tone == .failed ? Palette.error : Palette.inkTertiary)
                         .lineLimit(1)
                 }
             }
@@ -104,13 +104,13 @@ private struct ToastCard: View {
         case .working:
             ProgressView().controlSize(.small).transition(.scale(scale: 0.5).combined(with: .opacity))
         case .done:
-            Image(systemName: "checkmark.circle.fill").font(.system(size: 16, weight: .semibold)).foregroundStyle(
+            Image(systemName: "checkmark.circle.fill").font(Typeface.iconMark).foregroundStyle(
                 Palette.ok
             )
             .transition(.scale(scale: 0.5).combined(with: .opacity))
         case .failed:
-            Image(systemName: "exclamationmark.circle.fill").font(.system(size: 16, weight: .semibold)).foregroundStyle(
-                Palette.accent
+            Image(systemName: "exclamationmark.circle.fill").font(Typeface.iconMark).foregroundStyle(
+                Palette.error
             )
             .transition(.scale(scale: 0.5).combined(with: .opacity))
         }

@@ -32,7 +32,7 @@ final class FloatingPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
 
-    /// Top edge just under `anchor`, centred on it. If the icon is hidden (behind the notch or off a
+    /// Top edge just under `anchor`, centered on it. If the icon is hidden (behind the notch or off a
     /// crowded menu bar), the panel goes to the top-right corner of the main screen.
     func place(below anchor: NSRect?, gap: CGFloat = 6) {
         let screen = NSScreen.main ?? NSScreen.screens.first
@@ -73,7 +73,7 @@ final class FloatingPanel: NSPanel {
         guard !wasVisible, !reduceMotion, let layer = host.layer else { return }
         layer.removeAllAnimations()
 
-        let spring = WindowMotion.spring(response: WindowMotion.openResponse, damping: WindowMotion.openDamping)
+        let spring = WindowMotion.layerSpring(response: WindowMotion.openResponse, damping: WindowMotion.openDamping)
         spring.fromValue = WindowMotion.collapsed(size: host.bounds.size)
         spring.toValue = CATransform3DIdentity
         let fade = CABasicAnimation(keyPath: "opacity")
@@ -99,7 +99,7 @@ final class FloatingPanel: NSPanel {
             completion?()
             return
         }
-        let spring = WindowMotion.spring(response: WindowMotion.closeResponse, damping: WindowMotion.closeDamping)
+        let spring = WindowMotion.layerSpring(response: WindowMotion.closeResponse, damping: WindowMotion.closeDamping)
         spring.fromValue = CATransform3DIdentity
         spring.toValue = WindowMotion.collapsed(size: host.bounds.size)
         let fade = CABasicAnimation(keyPath: "opacity")

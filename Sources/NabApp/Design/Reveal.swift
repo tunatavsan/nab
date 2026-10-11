@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// How answers write themselves in: each glyph sharpens out of a blur and settles a few points,
+/// How answers appear while streaming: each glyph sharpens out of a blur and settles a few points,
 /// in reading order, behind a soft edge.
 enum RevealMotion {
     /// Glyphs in the soft edge: how many are mid-reveal at once.

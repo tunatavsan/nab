@@ -113,19 +113,15 @@ extension LibraryStore {
         }
     }
 
-    public func save(_ conversation: Conversation) {
+    public func save(_ conversation: Conversation) throws {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
-        do {
-            try FileManager.default.createDirectory(at: chatFolder, withIntermediateDirectories: true)
-            try encoder.encode(conversation).write(to: chatFile(conversation.id), options: .atomic)
-        } catch {
-            NSLog("Nab: could not save chat: \(error.localizedDescription)")
-        }
+        try FileManager.default.createDirectory(at: chatFolder, withIntermediateDirectories: true)
+        try encoder.encode(conversation).write(to: chatFile(conversation.id), options: .atomic)
     }
 
-    public func deleteConversation(_ id: String) {
-        try? FileManager.default.removeItem(at: chatFile(id))
+    public func deleteConversation(_ id: String) throws {
+        try Self.remove(chatFile(id))
     }
 
     private var chatFolder: URL {

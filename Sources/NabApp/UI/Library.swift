@@ -179,7 +179,7 @@ struct LibraryView: View {
                 Button("Copy Context", systemImage: "doc.on.doc") { Pasteboard.copy(model.pack()) }
                     .keyboardShortcut("c", modifiers: [.command, .shift])
                     .disabled(model.selectedCaptures.isEmpty)
-                    .help("Copy the selection as an AI-ready context pack (⇧⌘C)")
+                    .help("Copy the selection as an context pack for AI (⇧⌘C)")
                 Button("Chat", systemImage: "bubble.left.and.text.bubble.right") {
                     if model.page == .settings {
                         model.page = .library
@@ -211,7 +211,7 @@ struct LibraryView: View {
         let selected = model.selected
         ZStack {
             if model.page == .settings {
-                SettingsView(assistant: model.assistant)
+                SettingsView(assistant: model.assistant, shortcutAvailable: model.center.shortcutAvailable)
                     .transition(.opacity)
             } else if selected.count == 1, let entry = selected.first {
                 ReaderView(entry: entry, model: model)
@@ -221,8 +221,10 @@ struct LibraryView: View {
                 PackView(entries: selected, model: model)
                     .transition(.opacity)
             } else {
-                EmptyLibraryView(isEmpty: model.center.entries.isEmpty)
-                    .transition(.opacity)
+                EmptyLibraryView(
+                    isEmpty: model.center.entries.isEmpty, shortcutAvailable: model.center.shortcutAvailable
+                )
+                .transition(.opacity)
             }
         }
         .animation(Motion.settle, value: selected.map(\.id))
@@ -240,7 +242,7 @@ private struct SettingsRow: View {
         Button(action: action) {
             HStack(spacing: Space.s) {
                 Image(systemName: "gearshape")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(Typeface.icon)
                     .rotationEffect(.degrees(active ? 60 : 0))
                 Text("Settings").font(Typeface.rowTitle)
                 Spacer()
@@ -274,14 +276,14 @@ private struct EntryRow: View {
                     .lineLimit(2)
                 HStack(spacing: Space.xs) {
                     if entry.capture?.aiSummary != nil {
-                        Image(systemName: "sparkles").font(.system(size: 9, weight: .semibold)).foregroundStyle(
+                        Image(systemName: "sparkles").font(Typeface.iconMicro).foregroundStyle(
                             Palette.accent
                         )
                         .help("Summarized")
                     }
                     Text(entry.metaLine)
                         .font(Typeface.meta)
-                        .foregroundStyle(entry.phase == .failed ? Palette.accent : Palette.inkTertiary)
+                        .foregroundStyle(entry.phase == .failed ? Palette.error : Palette.inkTertiary)
                         .lineLimit(1)
                         .contentTransition(.opacity)
                 }
@@ -294,17 +296,24 @@ private struct EntryRow: View {
 
 private struct EmptyLibraryView: View {
     let isEmpty: Bool
+    let shortcutAvailable: Bool
     var body: some View {
         VStack(spacing: Space.m) {
             Text(isEmpty ? "Nothing nabbed yet." : "Select a video.")
                 .font(Typeface.display)
                 .foregroundStyle(Palette.inkSecondary)
             if isEmpty {
-                HStack(spacing: Space.s) {
-                    Text("With a YouTube video in front, press").font(Typeface.body)
-                    Text("⌃⌥N").font(Typeface.mono)
+                if shortcutAvailable {
+                    HStack(spacing: Space.s) {
+                        Text("With a YouTube video in front, press").font(Typeface.body)
+                        Text("⌃⌥N").font(Typeface.mono)
+                    }
+                    .foregroundStyle(Palette.inkTertiary)
+                } else {
+                    Text("⌃⌥N is in use by another app. Use Front Tab in the menu bar panel.")
+                        .font(Typeface.body)
+                        .foregroundStyle(Palette.inkTertiary)
                 }
-                .foregroundStyle(Palette.inkTertiary)
             } else {
                 Text("Select several to pack them into one context.")
                     .font(Typeface.body)

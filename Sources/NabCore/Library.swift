@@ -35,11 +35,10 @@ public struct Entry: Codable, Sendable, Hashable, Identifiable {
         inTray = try c.decodeIfPresent(Bool.self, forKey: .inTray) ?? false
     }
 
-    /// A small preview image, known from the link alone so it can show before the fetch finishes.
-    public var thumbnailURL: URL? {
-        guard id.hasPrefix("youtube:") else { return capture?.thumbnailURL }
-        return URL(string: "https://i.ytimg.com/vi/\(id.dropFirst("youtube:".count))/mqdefault.jpg")
-    }
+    /// The source and the id inside it, read from the entry id (`<source>:<id>`) so they are known before
+    /// the fetch finishes.
+    public var source: SourceKind { SourceKind(rawValue: String(id.prefix { $0 != ":" })) }
+    public var sourceID: String { String(id.drop { $0 != ":" }.dropFirst()) }
 
     public var phase: Phase { capture != nil ? .ready : failure != nil ? .failed : .fetching }
     public var title: String { capture?.title ?? provisionalTitle ?? url.absoluteString }
@@ -88,17 +87,21 @@ public actor LibraryStore {
             .sorted { $0.addedAt > $1.addedAt }
     }
 
-    public func save(_ entry: Entry) {
-        do {
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            try encoder.encode(entry).write(to: file(for: entry.id), options: .atomic)
-        } catch {
-            NSLog("Nab: could not save \(entry.id): \(error.localizedDescription)")
-        }
+    public func save(_ entry: Entry) throws {
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try encoder.encode(entry).write(to: file(for: entry.id), options: .atomic)
     }
 
-    public func delete(_ id: String) {
-        try? FileManager.default.removeItem(at: file(for: id))
+    public func delete(_ id: String) throws {
+        try Self.remove(file(for: id))
+    }
+
+    /// Removes a file; one that is already gone is not an error.
+    static func remove(_ file: URL) throws {
+        do {
+            try FileManager.default.removeItem(at: file)
+        } catch CocoaError.fileNoSuchFile {
+        }
     }
 
     private func file(for id: String) -> URL {

@@ -34,6 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.nabFrontTab()
             }
         } catch {
+            center.shortcutAvailable = false
             NSLog("Nab: the ⌃⌥N shortcut is unavailable: %@", error.localizedDescription)
         }
         Task { await center.load() }
@@ -56,10 +57,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let ids = center.registry.links(in: links).compactMap { center.registry.match($0)?.entryID }
                 center.add(linksIn: links)
                 Task {
-                    // Wait for the transcripts (they usually take under a second).
-                    for _ in 0..<150 where ids.contains(where: { center.entry($0)?.phase == .fetching }) {
-                        try? await Task.sleep(for: .milliseconds(100))
-                    }
+                    await center.waitForFetches(ids)
                     summarize(ids.filter { center.entry($0)?.capture != nil })
                 }
             case "library": showLibrary(select: nil)
