@@ -5,38 +5,48 @@ agent (`LSUIElement`): it lives in the menu bar and shows a Dock icon only while
 
 | Target | Depends on | Contents |
 | --- | --- | --- |
-| `NabCore` | Foundation, CryptoKit | `Capture` and its transcript, `SourceProvider` and `SourceRegistry`, `ContextPack`, `Conversation`, `Citation`, `LibraryStore`, `Gate`. |
+| `NabCore` | Foundation, CryptoKit | `Capture` and its transcript, `SourceProvider` and `SourceRegistry`, `ContextPack`, `Conversation`, `Citation`, `LibraryStore`, `Gate`, and the pure logic behind the interface: `HomeLayout`, `LibrarySearch`, `TranscriptSearch`, `AskScope`, `ChatStamp`, `RackText` and `SessionGrouping`. |
 | `NabYouTube` | `NabCore` | `YouTubeSource`: link parsing, the player request, caption tracks, captions and chapters. |
-| `NabAI` | `NabCore` | `AISettings`, `ProviderKind`, `Keychain` and `AIClient`, which streams one assistant turn from any provider. |
-| `NabApp` | all three | The app: `Capture/` (shortcut, browser bridge, `CaptureCenter`, `Assistant`), `UI/` (panel, toast, library, reader, chat, settings) and `Design/` (tokens, motion, fonts, the reveal and the frame probe). |
+| `NabAI` | `NabCore` | `AISettings`, `ProviderKind`, `Keychain` and `AIClient`, which streams one assistant turn from any provider; `ModelNames`, `ModelChoices` and `ProviderInfo` (provider status and probe) feed the settings page. |
+| `NabApp` | all three | The app: `Capture/` (shortcut, browser bridge, `CaptureCenter`, `Assistant`), `UI/` (menu panel, rack, library and its pages, ask window, search palette, chat, settings) and `Design/` (tokens, motion, fonts, the reveal and the frame probe). |
 | `NabCLI` | `NabCore`, `NabYouTube` | The `nab` command. |
 
 `NabCore` has no UI and makes no network requests, so everything above it can be tested with plain values.
 
 ## Capturing a video
 
-1. ⌃⌥N is a Carbon hot key (`HotKey`), which needs no permission. `nab://front` does the same.
+1. ⌃⌥N is a Carbon hot key (`HotKey`), which needs no permission. `nab://front` does the same. Before reading the
+   tab, Nab notes the pasteboard's change count; when the transcript lands and nothing else was copied meanwhile, the
+   video's context pack goes on the clipboard.
 2. `BrowserBridge` asks the frontmost browser for its active tab's URL and title with one Apple Event, on a serial
    queue with a four second timeout. Chromium browsers and Safari use different dictionaries; both are covered.
 3. `SourceRegistry` finds the `SourceProvider` that recognizes the link and gives it a stable entry id
-   (`youtube:<video id>`). A link already in the library is moved back into the tray instead of fetched again.
-4. `CaptureCenter` adds the entry right away, so the tray and the toast show it while it loads, and fetches it through
+   (`youtube:<video id>`). A link already in the library is moved into the open session instead of fetched again.
+4. `CaptureCenter` adds the entry to the open session right away, so the rack and the menu show it while it loads,
+   and fetches it through
    a `Gate` that runs at most six requests at once. The fetch holds a `ProcessInfo` activity, because App Nap otherwise
    throttles a background menu bar app's network work.
 5. `YouTubeSource` sends one request to YouTube's player endpoint, using the Android client, which answers without an
-   API key and without the proof-of-origin token the web client needs. The response lists caption tracks; Nab takes
-   a human-made track in the spoken language, then the automatic one, and downloads it as `json3`. Chapters are parsed
-   from the description the way YouTube derives them. Each request is hedged: if it has not answered in 1.2 seconds,
-   a second copy goes out on a separate connection pool and the first answer wins.
+   API key and without the proof-of-origin token the web client needs. The response lists caption tracks, one
+   automatic track per dub language on a dubbed video. Nab reads the original language from the audio track whose id
+   ends in `.4` (the default audio track follows the viewer's language and can be a dub), takes a human-made track in
+   it, then the automatic one, and downloads it as `json3`. Chapters are parsed from the description the way YouTube
+   derives them. Each request is hedged: if it has not answered in 0.45 seconds, a second copy goes out on a separate
+   connection pool and the first answer wins.
 6. The finished `Capture` is saved by `LibraryStore` as one JSON file per entry in
-   `~/Library/Application Support/Nab/Library`.
+   `~/Library/Application Support/Nab/Library`. Each entry records its `sessionID`; `SessionGrouping` rebuilds the
+   sets from it, and clusters entries saved before sessions existed by a pause of more than five minutes.
+
+A session ends when it is copied (⌃⌥A) or summarized (⌃⌥S), the next nab then starting a new one, on ⌃⌥X, or after five
+minutes without a nab. Its id and last activity are kept in `UserDefaults`, so a relaunch inside those five minutes
+resumes it.
 
 ## The context pack
 
 `ContextPack.render` turns any number of captures into one block of text. XML tags mark where each source starts and
 ends, and Markdown carries the structure inside: title, facts, chapters, description and the transcript.
 `Transcript.paragraphs` groups caption segments into passages that start at a chapter, or once 45 seconds have passed
-and a sentence ends. The reader shows the same passages, so a timecode a model quotes points at a passage the user can
+and a sentence ends. The transcript views show the same passages, so a timecode a model quotes points at a passage the user can
 see.
 
 ## Chatting
@@ -55,16 +65,51 @@ see.
    `~/Library/Application Support/Nab/Chats` when the turn ends. A finished summary of a single video is also stored
    on its capture, so it travels with the video in copied context packs.
 4. `Citation.link` turns `[12:40]` and `[2 12:40]` in an answer into `nab-cite:` links. In a single-video chat, a click
-   scrolls the reader to the passage and highlights it; otherwise it opens the video at that second. While an answer
+   opens the transcript drawer at the passage and lights it; otherwise it opens the video page at that second. While an answer
    is being written its links reach the chat's `OpenURLAction`; once it is selectable, macOS sends them to the system,
    which hands `nab-cite:` back to the app because Nab claims that scheme. Both paths end in `LibraryModel.open`.
 
 ## Interface
 
-SwiftUI views live in AppKit windows and panels: the menu bar panel and the toast are borderless `NSPanel`s, and the
-library is an `NSWindow` with a `NavigationSplitView` and the chat as its inspector. Settings is a page in the library
-window. Colors, type, radii and motion come from `Design/`; views define no color, font or animation of their own, and
-keep only one-off layout numbers. Animations that loop or bounce stand still when Reduce Motion is on.
+SwiftUI views live in AppKit windows and panels: the menu bar panel, the rack and the ask window are borderless
+`NSPanel`s, and the library is an `NSWindow` with a toolbar and one page at a time. Colors, type, radii and motion come
+from `Sources/NabApp/Design`: `Tokens.swift` (palette, type, radii), `Motion.swift`, `Fonts.swift`, `Reveal.swift` and
+`FrameProbe.swift`. Views define no color, font or animation of their own, and keep only one-off layout numbers.
+Animations that loop or bounce stand still when Reduce Motion is on.
+
+### Library routing
+
+`LibraryModel` (in `UI/Library.swift`) owns what the window shows. `Route` is `home`, `session([ids])`, `video(id)` or
+`settings`. `go(_:)` pushes the current route on `backStack` and clears `forwardStack`; `goBack` and `goForward` (⌘[,
+⌘]) walk them. `searchQuery` is the ⌘K palette's text, nil while it is closed. `focus` carries a transcript moment
+(entry id and seconds, with a token so a repeated click scrolls again) that a page scrolls to and lights.
+
+| Page | File |
+| --- | --- |
+| Home: the open session, earlier sessions by day, their chats; `FirstRun.swift` while the library is empty | `Home.swift` |
+| Session: sources, thread, composer and the transcript drawer | `SessionPage.swift`, `Chat.swift`, `TranscriptDrawer.swift` |
+| Video: cover, chapters, transcript with find and a timeline | `VideoPage.swift` |
+| Settings: capture, the AI card, shortcuts | `SettingsView.swift`, `SettingsAICard.swift` |
+| ⌘K palette: videos, chats, transcript lines | `SearchPalette.swift` over `LibrarySearch` |
+
+`Home` is laid out by `HomeLayout`, find in a transcript by `TranscriptSearch`, and the text under a chat title by
+`ChatStamp`. Shared passage grouping lives in `TranscriptSupport.swift`.
+
+### The ask window
+
+`AskWindow.swift` holds `AskWindowController` and `AskView`. It opens on ⌃⌥S, the Ask AI buttons, `nab://summarize`,
+`nab://chat` and `nab://ask`, and asks about the open session or the latest video (`AskScope` decides which and whether
+the choice is offered). The shortcut and the buttons summarize right away; a link sets `holdsSummary`, so nothing is
+sent until the user presses Summarize or Return (`nab://ask?q=` only pre-fills the field). Streaming and saving stay in
+`Assistant`, so closing the window never stops an answer. The window is a
+`FloatingPanel`, placed by `placeTopCenter(offset:)` on the screen under the mouse.
+
+A non-activating panel never makes Nab the active app, so the browser keeps its tab, but the main menu's Edit shortcuts
+do not reach the text field either. The controller installs a local `keyDown` monitor for the panel and routes keys
+itself: Esc closes, ⇥ switches scope, ⌘O opens the chat in the library, ⌘C copies a selection or else the answer, and
+⌘V, ⌘X, ⌘A and ⌘Z go to the field. A mouse click outside the panel (global and local monitors) closes it.
+
+### Motion
 
 Panels open and close on Core Animation springs with a preferred frame rate of 120 Hz. Answers write themselves in with
 `RevealRenderer`, a `TextRenderer` that draws each glyph sharpening out of a blur behind a moving edge. `RevealClock`
@@ -72,7 +117,7 @@ moves that edge toward the text that has arrived, so a stream that comes in burs
 on macOS skips custom renderers, so an answer becomes selectable once it has been fully drawn.
 
 Set `NAB_FRAME_PROBE=1` to log how many display refreshes each animation actually drew to
-`~/Library/Logs/Nab/frames.log`.
+`~/Library/Logs/Nab/frames.log`. `NAB_DATA_DIR` moves the data folder, and `NAB_OPEN='nab://…'` handles a URL at launch (debug builds only).
 
 ## Adding a source
 
@@ -93,7 +138,7 @@ public protocol SourceProvider: Sendable {
 
 `covers` and `link` have defaults (no covers until the fetch finds one; links open the item itself). Add a
 `SourceKind`, implement the provider in its own target, and register it in `SourceRegistry.standard` in the app and in
-the CLI. The library, the reader, the context pack, the chat and the CLI work with it unchanged.
+the CLI. The library, the transcript views, the context pack, the chat and the CLI work with it unchanged.
 
 ## Tests
 
@@ -103,8 +148,10 @@ keychain:
 - **YouTube:** link shapes, chapters, captions, caption track choice, covers and links to a moment.
 - **Library and context pack:** passages, the registry, the pack's structure, text from a video that tries to close the
   pack's tags, timecodes, the store's files (including long chat ids and unreadable entries) and the `Gate`.
-- **Conversations and settings:** citations, failed turns, prompt language, what is stored and how old defaults
-  migrate.
+- **Interface logic:** home grouping and filters, library search, find in a transcript, the ask scope, chat stamps,
+  rack text and session grouping, all as plain values.
+- **Conversations and settings:** citations, failed turns, prompt language, model names and choices, what is stored and
+  how old defaults migrate.
 - **AI client:** the prompts sent to each provider, server-sent events, server addresses, and the Anthropic and
   OpenAI-compatible streams end to end against a stubbed `URLSession`.
 - **Command-line providers:** small shell commands that ignore their input, flood standard error, fail, print Markdown

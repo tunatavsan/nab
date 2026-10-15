@@ -13,8 +13,11 @@ Examples of what to report:
 - Library entries, chats or transcripts reaching a place the user did not choose, such as a provider they did not
   select or an unexpected file.
 - An API key written anywhere outside the keychain, or shown in the interface or a log.
-- A `nab://` URL that makes Nab do more than add links, open the library, or open a chat and summarize the links it
-  was given, or a `nab-cite://` URL that does more than show a moment of a video in the open chat.
+- A `nab://` URL that makes Nab do more than this: add links; open the library, a video, the open session's chat,
+  Settings, the search palette or the menu bar panel; copy the session's context; start a new session; or open the
+  floating AI window. No `nab://` URL sends anything to the AI provider: `nab://summarize`, `nab://chat` and
+  `nab://ask` wait for the user to press Summarize or Return, and `nab://ask?q=` only pre-fills the field. Or a
+  `nab-cite://` URL that does more than show a moment of a video.
 - Text from a video or a model that can make Nab run a command or open something without the user acting.
 
 Please include the macOS version, the Nab commit or version, the provider involved and steps to reproduce. Do not
