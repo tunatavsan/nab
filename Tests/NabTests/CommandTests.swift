@@ -14,6 +14,54 @@ struct CommandTests {
         return try await collect(client.reply(context: prompt, turns: [ChatMessage(role: .user, text: "q")]))
     }
 
+    /// The arguments a default command passes to its CLI, read by a shell function standing in for it.
+    private func arguments(_ kind: ProviderKind, model: String, shell: String) throws -> [String] {
+        let tool = kind == .claudeCLI ? "claude" : "codex"
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: shell)
+        process.arguments = ["-c", "\(tool)() { printf '%s\\n' \"$@\"; }; " + kind.defaultCommand]
+        process.environment = ["NAB_MODEL": model, "NAB_SYSTEM": "system"]
+        process.standardInput = FileHandle.nullDevice
+        let output = Pipe()
+        process.standardOutput = output
+        try process.run()
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        return String(decoding: data, as: UTF8.self).split(separator: "\n").map(String.init)
+    }
+
+    @Test(arguments: ["/bin/zsh", "/bin/bash"])
+    func chosenModelReachesTheCLIAsItsOwnArgument(shell: String) throws {
+        for (kind, flag) in [(ProviderKind.claudeCLI, "--model"), (.codexCLI, "-m")] {
+            let args = try arguments(kind, model: "claude-sonnet-5-5", shell: shell)
+            let index = try #require(args.firstIndex(of: flag), "\(kind) under \(shell): \(args)")
+            #expect(args.indices.contains(index + 1) && args[index + 1] == "claude-sonnet-5-5")
+            let empty = try arguments(kind, model: "", shell: shell)
+            #expect(!empty.contains(flag) && !empty.contains(""))
+        }
+    }
+
+    /// The whole path of a model switch: the card's id lands in the settings, and the command the client runs
+    /// hands it to the CLI as `--model` plus a value.
+    @Test func choosingSonnetPutsItInTheSettingsAndTheCommand() async throws {
+        var settings = AISettings()
+        settings.kind = .claudeCLI
+        let sonnet = try #require(
+            ModelChoices.featured(for: .claudeCLI, available: []).first { $0.name == "Sonnet 5.5" })
+        settings.model = sonnet.id
+        #expect(settings.models[.claudeCLI] == "claude-sonnet-5-5")
+        let stored = try JSONDecoder().decode(AISettings.self, from: JSONEncoder().encode(settings))
+        #expect(stored.kind == .claudeCLI && stored.model == "claude-sonnet-5-5")
+
+        // A stand-in `claude` answers with the value that follows a separate `--model` argument, if any.
+        settings.command =
+            #"claude() { while [ $# -gt 0 ]; do [ "$1" = --model ] && m="$2"; shift; done; "#
+            + #"printf '{"type":"result","is_error":false,"result":"%s"}\n' "$m"; }; "# + settings.command
+        let client = AIClient(settings: settings, apiKey: nil)
+        let answer = try await collect(client.reply(context: "ctx", turns: [ChatMessage(role: .user, text: "q")]))
+        #expect(answer == "claude-sonnet-5-5")
+    }
+
     @Test func commandThatIgnoresItsInputDoesNotKillTheApp() async throws {
         // Larger than a pipe buffer, so the write is still in progress when the command exits.
         #expect(try await run("echo ok", prompt: String(repeating: "x", count: 1_000_000)) == "ok\n")

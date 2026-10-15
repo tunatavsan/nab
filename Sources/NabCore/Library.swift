@@ -15,6 +15,8 @@ public struct Entry: Codable, Sendable, Hashable, Identifiable {
     /// In the tray: the working set of recent captures that "Copy context" packs. Clearing the tray
     /// keeps entries in the library.
     public var inTray: Bool
+    /// The capture session this entry was nabbed in; nil for entries saved before sessions existed.
+    public var sessionID: String?
 
     public init(id: String, url: URL, addedAt: Date = .now, provisionalTitle: String? = nil, inTray: Bool = true) {
         self.id = id
@@ -33,6 +35,7 @@ public struct Entry: Codable, Sendable, Hashable, Identifiable {
         capture = try c.decodeIfPresent(Capture.self, forKey: .capture)
         failure = try c.decodeIfPresent(String.self, forKey: .failure)
         inTray = try c.decodeIfPresent(Bool.self, forKey: .inTray) ?? false
+        sessionID = try c.decodeIfPresent(String.self, forKey: .sessionID)
     }
 
     /// The source and the id inside it, read from the entry id (`<source>:<id>`) so they are known before

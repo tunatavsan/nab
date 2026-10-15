@@ -43,13 +43,15 @@ public enum ProviderKind: String, Codable, CaseIterable, Sendable, Identifiable 
     }
 
     /// Run in the user's login shell so PATH and sign-in match their terminal. The prompt goes in on
-    /// stdin; `$NAB_SYSTEM` and `$NAB_MODEL` carry the system prompt and model.
+    /// stdin; `$NAB_SYSTEM` and `$NAB_MODEL` carry the system prompt and model. The model flag and its value
+    /// are two expansions: zsh does not split `${NAB_MODEL:+--model "$NAB_MODEL"}` into words, so the CLI
+    /// received "--model <id>" as one unknown option and failed whenever a model was chosen.
     public var defaultCommand: String {
         switch self {
         case .claudeCLI:
-            #"claude -p --system-prompt "$NAB_SYSTEM" ${NAB_MODEL:+--model "$NAB_MODEL"} --tools "" --strict-mcp-config --no-session-persistence --output-format stream-json --include-partial-messages --verbose"#
+            #"claude -p --system-prompt "$NAB_SYSTEM" ${NAB_MODEL:+--model} ${NAB_MODEL:+"$NAB_MODEL"} --tools "" --strict-mcp-config --no-session-persistence --output-format stream-json --include-partial-messages --verbose"#
         case .codexCLI:
-            #"codex exec --skip-git-repo-check --sandbox read-only ${NAB_MODEL:+-m "$NAB_MODEL"} -"#
+            #"codex exec --skip-git-repo-check --sandbox read-only ${NAB_MODEL:+-m} ${NAB_MODEL:+"$NAB_MODEL"} -"#
         default: ""
         }
     }
@@ -166,6 +168,8 @@ public struct AISettings: Codable, Sendable, Equatable {
     static let previousCommands: Set<String> = [
         #"claude -p --system-prompt "$NAB_SYSTEM" ${NAB_MODEL:+--model "$NAB_MODEL"} --tools "" --strict-mcp-config --no-session-persistence"#,
         #"codex exec --skip-git-repo-check ${NAB_MODEL:+-m "$NAB_MODEL"} -"#,
+        #"claude -p --system-prompt "$NAB_SYSTEM" ${NAB_MODEL:+--model "$NAB_MODEL"} --tools "" --strict-mcp-config --no-session-persistence --output-format stream-json --include-partial-messages --verbose"#,
+        #"codex exec --skip-git-repo-check --sandbox read-only ${NAB_MODEL:+-m "$NAB_MODEL"} -"#,
     ]
 
     /// Languages offered for answers, by English name. The stored value is the English name, which the prompts use.

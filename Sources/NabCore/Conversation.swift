@@ -38,15 +38,19 @@ public struct Citation: Hashable, Sendable {
         self.seconds = seconds
     }
 
+    /// The longest moment a link may name; nothing nabbed is longer, and anything above is a forged link.
+    public static let maxSeconds: TimeInterval = 86_400
+
     public init?(url: URL) {
         let parts = url.pathComponents.filter { $0 != "/" }
-        guard url.scheme == Self.scheme, parts.count == 2, let video = Int(parts[0]), let seconds = Double(parts[1])
+        guard url.scheme == Self.scheme, parts.count == 2, let video = Int(parts[0]), let seconds = Double(parts[1]),
+            seconds.isFinite, (0...Self.maxSeconds).contains(seconds)
         else { return nil }
         self.video = video == 0 ? nil : video
         self.seconds = seconds
     }
 
-    public var url: URL { URL(string: "\(Self.scheme)://t/\(video ?? 0)/\(Int(seconds))")! }
+    public var url: URL { URL(string: "\(Self.scheme)://t/\(video ?? 0)/\(seconds.wholeSeconds)")! }
 
     public static func seconds(_ timecode: Substring) -> TimeInterval? {
         let parts = timecode.split(separator: ":").compactMap { Int($0) }
@@ -102,13 +106,26 @@ public struct Conversation: Codable, Sendable, Hashable, Identifiable {
 
 extension LibraryStore {
     public func conversation(_ id: String) -> Conversation? {
-        guard let data = try? Data(contentsOf: chatFile(id)) else { return nil }
+        read(chatFile(id))
+    }
+
+    /// Every saved chat, newest first. Unreadable files are skipped.
+    public func allConversations() -> [Conversation] {
+        let files =
+            (try? FileManager.default.contentsOfDirectory(at: chatFolder, includingPropertiesForKeys: nil)) ?? []
+        return files.filter { $0.pathExtension == "json" }
+            .compactMap { read($0) }
+            .sorted { $0.updatedAt > $1.updatedAt }
+    }
+
+    private func read(_ file: URL) -> Conversation? {
+        guard let data = try? Data(contentsOf: file) else { return nil }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         do {
             return try decoder.decode(Conversation.self, from: data)
         } catch {
-            NSLog("Nab: could not read chat \(id): \(error)")
+            NSLog("Nab: could not read chat \(file.lastPathComponent): \(error)")
             return nil
         }
     }

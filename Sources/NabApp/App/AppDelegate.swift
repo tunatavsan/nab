@@ -7,9 +7,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let center = CaptureCenter()
     private lazy var assistant = Assistant(center: center)
     private var status: StatusController!
-    private var toast: ToastController!
+    private var rack: RackController!
     private var library: LibraryWindowController?
-    private var hotKey: HotKey?
+    private lazy var askWindow = AskWindowController(
+        center: center, assistant: assistant,
+        // ⌘O carries the conversation over, so even one video opens on its chat rather than its transcript.
+        openLibrary: { [weak self] ids in self?.libraryWindow().show(select: ids, chat: true) },
+        openVideo: { [weak self] id, seconds in self?.libraryWindow().showVideo(id, at: seconds) })
+    private var hotKeys: [HotKey] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -26,26 +31,68 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 exportTray: { [weak self] in self.map { Exporter.save($0.center.trayCaptures) } },
                 openLibrary: { [weak self] id in self?.showLibrary(select: id) },
                 summarize: { [weak self] ids in self?.summarize(ids) },
-                openSettings: { [weak self] in self?.showSettings() }))
+                openSettings: { [weak self] in self?.showSettings() },
+                copyAll: { [weak self] in self?.center.copySession() },
+                newSession: { [weak self] in self?.center.closeSession(announce: true) }))
         assistant.openSettings = { [weak self] in self?.showSettings() }
-        toast = ToastController(center: center) { [weak self] in self?.status.anchorRect }
-        do {
-            hotKey = try HotKey(keyCode: kVK_ANSI_N, modifiers: controlKey | optionKey, id: 1) { [weak self] in
-                self?.nabFrontTab()
-            }
-        } catch {
-            center.shortcutAvailable = false
-            NSLog("Nab: the ⌃⌥N shortcut is unavailable: %@", error.localizedDescription)
+        rack = RackController(
+            center: center, anchor: { [weak self] in self?.status.anchorRect },
+            openLibrary: { [weak self] id in self?.showLibrary(select: id) },
+            openSession: { [weak self] in self?.libraryWindow().showCurrentSession() },
+            summarize: { [weak self] ids in self?.summarize(ids) })
+        registerShortcuts()
+        Task {
+            await center.load()
+            #if DEBUG
+                // Debug builds only: `NAB_OPEN='nab://…'` handles that URL as if it had been opened.
+                if let raw = ProcessInfo.processInfo.environment["NAB_OPEN"], let url = URL(string: raw) {
+                    application(NSApp, open: [url])
+                }
+            #endif
         }
-        Task { await center.load() }
     }
 
-    /// `nab://front` does what the shortcut does; `nab://add?url=…` adds links; `nab://chat?url=…` adds
-    /// them and opens a chat that starts with a summary; `nab://library` opens the window. Other tools
-    /// (Shortcuts, Raycast, scripts, agents) can drive Nab through these.
+    private func registerShortcuts() {
+        let shortcuts: [(name: String, key: Int, id: UInt32, action: () -> Void)] = [
+            ("⌃⌥N", kVK_ANSI_N, 1, { [weak self] in self?.nabFrontTab() }),
+            ("⌃⌥A", kVK_ANSI_A, 2, { [weak self] in self?.center.copySession() }),
+            (
+                "⌃⌥S", kVK_ANSI_S, 3,
+                { [weak self] in
+                    guard let self else { return }
+                    if askWindow.isVisible { askWindow.close() } else { summarize(center.sessionSummaryIDs()) }
+                }
+            ),
+            ("⌃⌥X", kVK_ANSI_X, 4, { [weak self] in self?.center.closeSession(announce: true) }),
+        ]
+        for shortcut in shortcuts {
+            do {
+                hotKeys.append(
+                    try HotKey(
+                        keyCode: shortcut.key, modifiers: controlKey | optionKey, id: shortcut.id,
+                        action: shortcut.action))
+            } catch {
+                if shortcut.id == 1 { center.shortcutAvailable = false }
+                center.unavailableShortcuts.append(shortcut.name)
+                NSLog("Nab: the %@ shortcut is unavailable: %@", shortcut.name, error.localizedDescription)
+            }
+        }
+    }
+
+    /// `nab://front` does what the shortcut does; `nab://add?url=…` adds links; `nab://chat?url=…` adds them and
+    /// opens the floating AI window on them once they are fetched; `nab://copy` copies the open session's context;
+    /// `nab://summarize` opens that window on the session; `nab://ask` opens it on the current scope with the field
+    /// focused, and `nab://ask?q=<text>` pre-fills the field with that text. A link can come from any web page, so
+    /// none of these sends anything: the user presses Summarize or Return (⌃⌥S and the Ask AI buttons summarize
+    /// right away). `nab://close` starts a fresh session; `nab://menu` opens the menu bar panel; `nab://library`
+    /// opens the window, `nab://library?id=<entry>` a video and `nab://library?session=current` the session's chat;
+    /// `nab://settings` opens the settings page; `nab://search?q=<text>` opens the ⌘K palette with that text.
+    /// Other tools (Shortcuts, Raycast, scripts, agents) can drive Nab through these.
     func application(_ application: NSApplication, open urls: [URL]) {
         // Timecode links from a selectable answer come back through the system (see `ChatView.cite`).
-        for citation in urls.compactMap(Citation.init(url:)) { libraryWindow().open(citation) }
+        for citation in urls.compactMap(Citation.init(url:)) {
+            if askWindow.isVisible { askWindow.open(citation) } else { libraryWindow().open(citation) }
+        }
         for url in urls where url.scheme == "nab" {
             let links =
                 URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?
@@ -58,9 +105,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 center.add(linksIn: links)
                 Task {
                     await center.waitForFetches(ids)
-                    summarize(ids.filter { center.entry($0)?.capture != nil })
+                    summarize(ids.filter { center.entry($0)?.capture != nil }, fromLink: true)
                 }
-            case "library": showLibrary(select: nil)
+            case "copy": center.copySession()
+            case "summarize": summarize(center.sessionSummaryIDs(), fromLink: true)
+            case "ask":
+                let text = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?
+                    .first { $0.name == "q" }?.value
+                askWindow.show(draft: AskScope.draft(fromLinkText: text), holdsSummary: true)
+            case "close": center.closeSession(announce: true)
+            case "menu": status.show()
+            case "library":
+                let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+                if let id = query.first(where: { $0.name == "id" })?.value {
+                    showLibrary(select: id)
+                } else if query.contains(where: { $0.name == "session" && $0.value == "current" }) {
+                    libraryWindow().showCurrentSession()
+                } else {
+                    showLibrary(select: nil)
+                }
+            case "settings": showSettings()
+            case "search":
+                let text = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?
+                    .first { $0.name == "q" }?.value
+                libraryWindow().showSearch(query: text ?? "")
             default: break
             }
         }
@@ -79,20 +147,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         libraryWindow().show(select: id.map { [$0] } ?? [])
     }
 
-    private func summarize(_ ids: [String]) {
+    private func summarize(_ ids: [String], fromLink: Bool = false) {
         guard !ids.isEmpty else { return }
-        libraryWindow().show(select: ids, chat: true)
-        Task { await assistant.summarizeIfNew(ids) }
+        askWindow.show(ids: ids, holdsSummary: fromLink)
     }
 
     private func libraryWindow() -> LibraryWindowController {
         if let library { return library }
         let created = LibraryWindowController(center: center, assistant: assistant)
+        created.askInWindow = { [weak self] ids in self?.summarize(ids) }
         library = created
         return created
     }
 
     @objc func showSettings() {
+        askWindow.close()
         libraryWindow().showSettings()
     }
 }

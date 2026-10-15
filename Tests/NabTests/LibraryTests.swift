@@ -87,6 +87,16 @@ struct LibraryTests {
         #expect(Timecode.string(-4) == "0:00")
     }
 
+    @Test func timecodesSurviveNonFiniteSeconds() {
+        #expect(Timecode.string(.infinity) == "0:00")
+        #expect(Timecode.string(-.infinity) == "0:00")
+        #expect(Timecode.string(.nan) == "0:00")
+        #expect(Timecode.string(1e30) == Timecode.string(1e30))
+        #expect(TimeInterval.infinity.wholeSeconds == 0)
+        #expect(TimeInterval.nan.wholeSeconds == 0)
+        #expect(TimeInterval(65.9).wholeSeconds == 65)
+    }
+
     @Test func longPackIDsGetTheirOwnChatFile() async throws {
         let folder = FileManager.default.temporaryDirectory.appending(path: "nab-tests-\(UUID().uuidString)/Library")
         defer { try? FileManager.default.removeItem(at: folder.deletingLastPathComponent()) }

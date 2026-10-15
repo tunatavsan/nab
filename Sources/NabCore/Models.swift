@@ -136,10 +136,19 @@ extension Transcript {
     }
 }
 
+extension TimeInterval {
+    /// Whole seconds for display and links. Non-finite values count as 0 and huge ones are clamped, because
+    /// `Int(_:)` traps on both and times can arrive from outside (a `nab-cite://` link).
+    public var wholeSeconds: Int {
+        guard isFinite else { return 0 }
+        return Int(min(max(self, 0), 1e12).rounded(.down))
+    }
+}
+
 public enum Timecode {
     /// `1:02:03` or `4:05`.
     public static func string(_ seconds: TimeInterval) -> String {
-        let total = max(0, Int(seconds.rounded(.down)))
+        let total = seconds.wholeSeconds
         let h = total / 3600
         let m = (total % 3600) / 60
         let s = total % 60

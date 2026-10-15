@@ -16,6 +16,15 @@ struct ConversationTests {
         #expect(Citation(url: URL(string: "nab://t/2/760")!) == nil)
     }
 
+    @Test func citationsFromOutsideURLsRejectHostileSeconds() {
+        for tail in ["inf", "-inf", "nan", "1e400", "-5", "90000", "1e18"] {
+            #expect(Citation(url: URL(string: "nab-cite://t/1/\(tail)")!) == nil, "\(tail)")
+        }
+        #expect(Citation(url: URL(string: "nab-cite://t/1/86400")!) == Citation(video: 1, seconds: 86_400))
+        #expect(Citation(video: nil, seconds: .infinity).url.absoluteString == "nab-cite://t/0/0")
+        #expect(Citation(video: nil, seconds: .nan).url.absoluteString == "nab-cite://t/0/0")
+    }
+
     @Test func failedTurnsAreNotSentBack() {
         var chat = Conversation(entryIDs: ["youtube:a"])
         chat.messages = [
@@ -25,5 +34,19 @@ struct ConversationTests {
         ]
         #expect(chat.sendable.map(\.text) == ["q1", "a1", "q3"])
         #expect(Conversation.id(for: ["b", "a"]) == Conversation.id(for: ["a", "b"]))
+    }
+
+    @Test func allConversationsListsSavedChatsNewestFirst() async throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: "nab-tests-\(UUID().uuidString)/Library")
+        defer { try? FileManager.default.removeItem(at: folder.deletingLastPathComponent()) }
+        let store = LibraryStore(folder: folder)
+        #expect(await store.allConversations().isEmpty)
+        var older = Conversation(entryIDs: ["youtube:aaaaaaaaaaa"])
+        older.updatedAt = Date(timeIntervalSince1970: 1_000)
+        var newer = Conversation(entryIDs: ["youtube:bbbbbbbbbbb", "youtube:ccccccccccc"])
+        newer.updatedAt = Date(timeIntervalSince1970: 2_000)
+        try await store.save(older)
+        try await store.save(newer)
+        #expect(await store.allConversations().map(\.id) == [newer.id, older.id])
     }
 }

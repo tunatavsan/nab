@@ -20,25 +20,67 @@ final class CaptureCenter {
     private(set) var toast: Toast?
     var inFlight: Int { entries.filter { $0.phase == .fetching }.count }
     var tray: [Entry] { entries.filter(\.inTray) }
+    /// The open session's entries, newest first. `inTray` means "in the open session".
+    var session: [Entry] { tray }
     var trayCaptures: [Capture] { tray.compactMap(\.capture) }
+
+    init() { UserDefaults.standard.register(defaults: ["autoCopy": true]) }
 
     let registry = SourceRegistry.standard
     let store = LibraryStore()
     private let gate = Gate(limit: 6)
     private var toastDismissal: Task<Void, Never>?
+    /// True while the pointer is over the rack, which then stays until the pointer leaves.
+    private var toastHovered = false
     private var fetching: Set<String> = []
     /// False when the system refused the global shortcut, so the interface stops advertising it.
     var shortcutAvailable = true
+    /// Shortcuts the system refused, such as "⌃⌥A", so the interface stops advertising them.
+    var unavailableShortcuts: [String] = []
+
+    /// The open capture session: the videos nabbed in one burst, copied together into one AI conversation.
+    private(set) var sessionID: String?
+    /// True once the session was copied or summarized; the next nab starts a new one.
+    private(set) var sessionConsumed = false
+    private(set) var sessionLastActivity: Date?
+    /// Entries whose context the auto-copy already put on the clipboard.
+    private(set) var copiedIDs: Set<String> = []
+    /// Seconds without a nab after which the open session closes by itself; the "sessionIdleMinutes" setting.
+    static var sessionIdle: TimeInterval {
+        let defaults = UserDefaults.standard
+        defaults.register(defaults: ["sessionIdleMinutes": 5])
+        return TimeInterval(min(max(defaults.integer(forKey: "sessionIdleMinutes"), 1), 60) * 60)
+    }
+    private var idleTask: Task<Void, Never>?
+    /// Pasteboard change counts recorded when a nab began, per entry waiting for its auto-copy.
+    private var copyMarks: [String: Int] = [:]
+    /// The pasteboard change count right after Nab's own last copy, so a later auto-copy may replace it.
+    private var ownCopyCount: Int?
+    private static let sessionKey = "session"
+
+    private struct SessionState: Codable {
+        var id: String?
+        var consumed: Bool
+        var lastActivity: Date?
+    }
+
     /// How long `nab://chat` waits for transcripts before it summarizes what has arrived.
     static let fetchWaitTimeout: Duration = .seconds(15)
 
     func load() async {
+        restoreSession()
         let saved = await store.loadAll()
         // Links opened with the app (a nab:// URL, the shortcut) can arrive while the library is read; they are
         // newer, so they stay on top and their saved copies are skipped.
         let added = Set(entries.map(\.id))
         let restored = saved.filter { !added.contains($0.id) }
         entries += restored
+        // Entries left in a session that no longer exists drop out of the tray.
+        for index in entries.indices
+        where entries[index].inTray && (sessionID == nil || entries[index].sessionID != sessionID) {
+            entries[index].inTray = false
+            persist(entries[index])
+        }
         // An entry still fetching when the app quit is fetched again.
         for entry in restored where entry.phase == .fetching { fetch(entry.id) }
     }
@@ -47,8 +89,10 @@ final class CaptureCenter {
     func nabFrontTab() async {
         let registry = registry
         show(.init(tone: .working, title: "Reading the front tab…", detail: ""), hold: true)
+        // Read before the tab is fetched: Nab's own copy bumps the count, and a copy by the user must win.
+        let mark = NSPasteboard.general.changeCount
         switch await BrowserBridge.frontTab(accept: { registry.match($0) != nil }) {
-        case .success(let tab): add(tab.url, title: Self.cleanTitle(tab.title))
+        case .success(let tab): add(tab.url, title: Self.cleanTitle(tab.title), copyMark: mark)
         case .failure(let error): show(.init(tone: .failed, title: "Nothing to nab", detail: error.message))
         }
     }
@@ -68,26 +112,42 @@ final class CaptureCenter {
         add(linksIn: NSPasteboard.general.string(forType: .string) ?? "")
     }
 
-    func add(_ url: URL, title: String?, announce: Bool = true) {
+    func add(_ url: URL, title: String?, announce: Bool = true, copyMark: Int? = nil) {
         guard let match = registry.match(url) else {
             show(.init(tone: .failed, title: "Nab can't read this link yet", detail: url.host() ?? url.absoluteString))
             return
         }
+        let now = Date.now
+        if SessionGrouping.shouldStartNewSession(
+            now: now, lastActivity: sessionLastActivity, consumed: sessionConsumed, hasSession: sessionID != nil,
+            idle: Self.sessionIdle)
+        {
+            closeSession()
+            sessionID = "s-\(Int(now.timeIntervalSince1970 * 1000))"
+        }
+        sessionLastActivity = now
+        scheduleIdleClose()
+        persistSession()
+        if let copyMark { copyMarks[match.entryID] = copyMark }
         if let index = entries.firstIndex(where: { $0.id == match.entryID }) {
             var entry = entries.remove(at: index)
             entry.addedAt = .now
             entry.inTray = true
+            entry.sessionID = sessionID
             entries.insert(entry, at: 0)
             persist(entry)
             if entry.phase == .failed { retry(entry.id) }
             if announce {
                 show(
                     .init(
-                        tone: .done, title: entry.title, detail: "Already in your tray", thumbnail: entry.thumbnailURL))
+                        tone: .done, title: entry.title, detail: "Already in your session",
+                        thumbnail: entry.thumbnailURL))
             }
+            if entry.phase == .ready { autoCopy(entry) }
             return
         }
-        let entry = Entry(id: match.entryID, url: url, provisionalTitle: title)
+        var entry = Entry(id: match.entryID, url: url, provisionalTitle: title)
+        entry.sessionID = sessionID
         entries.insert(entry, at: 0)
         persist(entry)
         if announce {
@@ -143,14 +203,115 @@ final class CaptureCenter {
         }
     }
 
-    func copyTray() {
+    func copyTray() { copySession() }
+
+    // MARK: Session
+
+    /// Ends the open session; its entries stay in the library. The next nab starts a new one.
+    func closeSession(announce: Bool = false) {
+        clearTray()
+        sessionID = nil
+        sessionConsumed = false
+        sessionLastActivity = nil
+        copiedIDs = []
+        idleTask?.cancel()
+        idleTask = nil
+        persistSession()
+        if announce {
+            show(.init(tone: .done, title: "New session", detail: "The next video starts a fresh set."))
+        }
+    }
+
+    /// Puts the session's ready captures on the clipboard as one context block. The list stays; the next nab
+    /// starts a new session.
+    func copySession() {
         let captures = trayCaptures
-        guard !captures.isEmpty else { return }
-        Pasteboard.copy(ContextPack.render(captures))
+        guard !captures.isEmpty else {
+            show(.init(tone: .failed, title: "Nothing to copy yet", detail: "Press ⌃⌥N with a video in front."))
+            return
+        }
+        let text = ContextPack.render(captures)
+        Pasteboard.copy(text)
+        ownCopyCount = NSPasteboard.general.changeCount
+        sessionConsumed = true
+        persistSession()
+        let pending = session.count - captures.count
         show(
             .init(
-                tone: .done, title: "Context copied",
-                detail: "\(captures.count) video\(captures.count == 1 ? "" : "s") · paste into any AI"))
+                tone: .done, title: "Copied \(captures.count) video\(captures.count == 1 ? "" : "s")",
+                detail: "~\(Self.thousands(ContextPack.estimatedTokens(text)))k tokens · paste into any AI"
+                    + (pending > 0 ? " · \(pending) still fetching" : "")))
+    }
+
+    /// The entries a summary should cover: the session's ready captures, or else the latest one.
+    func sessionSummaryIDs() -> [String] {
+        var ids = session.filter { $0.capture != nil }.map(\.id)
+        if ids.isEmpty, let latest = entries.first(where: { $0.capture != nil }) { ids = [latest.id] }
+        if !ids.isEmpty {
+            sessionConsumed = true
+            persistSession()
+        }
+        return ids
+    }
+
+    private static func thousands(_ tokens: Int) -> String {
+        let k = Double(tokens) / 1000
+        return k < 10 ? k.formatted(.number.precision(.fractionLength(1))) : Int(k.rounded()).formatted()
+    }
+
+    /// Copies a fresh capture's context when the user asked for it and has not copied anything since nabbing.
+    private func autoCopy(_ entry: Entry) {
+        guard let mark = copyMarks.removeValue(forKey: entry.id), let capture = entry.capture,
+            UserDefaults.standard.bool(forKey: "autoCopy")
+        else { return }
+        // Compare before copying: the copy itself bumps the count. Nab's own earlier copy may be replaced, so
+        // nabbing several videos in a row leaves the latest one on the clipboard.
+        let current = NSPasteboard.general.changeCount
+        if current == mark || current == ownCopyCount {
+            let text = ContextPack.render([capture])
+            Pasteboard.copy(text)
+            ownCopyCount = NSPasteboard.general.changeCount
+            copiedIDs.insert(entry.id)
+            show(
+                .init(
+                    tone: .done, title: entry.title,
+                    detail: "Copied · ~\(Self.thousands(ContextPack.estimatedTokens(text)))k tokens · ⌘V into any AI",
+                    thumbnail: entry.thumbnailURL))
+        } else {
+            show(
+                .init(
+                    tone: .done, title: entry.title, detail: "Ready · clipboard changed, ⌃⌥A copies the session",
+                    thumbnail: entry.thumbnailURL))
+        }
+    }
+
+    private func scheduleIdleClose() {
+        idleTask?.cancel()
+        let remaining = max(0, Self.sessionIdle - Date.now.timeIntervalSince(sessionLastActivity ?? .now))
+        idleTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(remaining))
+            guard !Task.isCancelled else { return }
+            self?.closeSession()
+        }
+    }
+
+    private func persistSession() {
+        let state = SessionState(id: sessionID, consumed: sessionConsumed, lastActivity: sessionLastActivity)
+        UserDefaults.standard.set(try? JSONEncoder().encode(state), forKey: Self.sessionKey)
+    }
+
+    private func restoreSession() {
+        guard let data = UserDefaults.standard.data(forKey: Self.sessionKey),
+            let state = try? JSONDecoder().decode(SessionState.self, from: data),
+            let id = state.id, let last = state.lastActivity,
+            Date.now.timeIntervalSince(last) <= Self.sessionIdle
+        else { return }
+        // A session opened by a nab that arrived while the library loaded wins over the saved one.
+        guard sessionID == nil else { return }
+        sessionID = id
+        sessionConsumed = state.consumed
+        sessionLastActivity = last
+        scheduleIdleClose()
     }
 
     private func fetch(_ id: String) {
@@ -190,6 +351,7 @@ final class CaptureCenter {
         }
         let entry = entries[index]
         persist(entry)
+        if entry.phase == .failed { copyMarks[id] = nil }
 
         let remaining = inFlight
         switch (entry.phase, remaining) {
@@ -200,11 +362,13 @@ final class CaptureCenter {
             )
         case (_, 0):
             show(.init(tone: .done, title: entry.title, detail: entry.metaLine, thumbnail: entry.thumbnailURL))
+            autoCopy(entry)
         default:
             show(
                 .init(
                     tone: .working, title: entry.title, detail: "Done · \(remaining) more in flight",
                     thumbnail: entry.thumbnailURL), hold: true)
+            autoCopy(entry)
         }
     }
 
@@ -233,16 +397,35 @@ final class CaptureCenter {
         next.pulse = (toast?.pulse ?? 0) + 1
         toast = next
         toastDismissal?.cancel()
-        guard !hold else { return }
+        guard !hold, !toastHovered else { return }
+        scheduleDismissal(after: next.tone == .failed ? 3.6 : 2.2)
+    }
+
+    private func scheduleDismissal(after seconds: Double) {
+        toastDismissal?.cancel()
         toastDismissal = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(next.tone == .failed ? 3.6 : 2.2))
+            try? await Task.sleep(for: .seconds(seconds))
             guard !Task.isCancelled else { return }
             self?.toast = nil
+            self?.toastHovered = false
+        }
+    }
+
+    /// The pointer entered or left the rack: it stays while hovered and goes a moment after the pointer leaves.
+    func holdToast(_ hovering: Bool) {
+        toastHovered = hovering && toast != nil
+        guard toast != nil else { return }
+        if hovering {
+            toastDismissal?.cancel()
+        } else if inFlight == 0 {
+            // While fetches run the next update schedules the dismissal itself.
+            scheduleDismissal(after: 1.5)
         }
     }
 
     func dismissToast() {
         toastDismissal?.cancel()
+        toastHovered = false
         toast = nil
     }
 

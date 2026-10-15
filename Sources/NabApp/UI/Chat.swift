@@ -3,12 +3,16 @@ import NabAI
 import NabCore
 import SwiftUI
 
-/// The chat beside the reader. Answers stream in, cite timecodes, and a click on a timecode scrolls
-/// the transcript to the passage it rests on (⌘-click opens the video there instead).
+/// The conversation of a session page: a centred thread, the empty and problem states, and the composer that
+/// floats over the bottom. Answers stream in and cite timecodes; a click on a citation opens the transcript
+/// drawer at that moment (⌘-click opens the video instead).
 struct ChatView: View {
     let entryIDs: [String]
     let model: LibraryModel
+    /// The passage open in the transcript drawer, so its chip in the answer is filled.
+    var activeCitation: Citation?
     @State private var draft = ""
+    @State private var selection: TextSelection?
     @FocusState private var composing: Bool
 
     private var assistant: Assistant { model.assistant }
@@ -16,16 +20,15 @@ struct ChatView: View {
     var body: some View {
         let messages = assistant.conversation(entryIDs)?.messages ?? []
         let busy = assistant.isStreaming(entryIDs)
-        VStack(spacing: 0) {
-            header(hasMessages: !messages.isEmpty, busy: busy)
+        ZStack(alignment: .bottom) {
             ZStack {
                 if messages.isEmpty {
                     intro.transition(.opacity)
                 } else {
-                    transcript(messages, busy: busy).transition(.opacity)
+                    thread(messages, busy: busy).transition(.opacity)
                 }
             }
-            .frame(maxHeight: .infinity)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             composer(busy: busy)
         }
         .environment(\.openURL, OpenURLAction(handler: cite))
@@ -40,27 +43,65 @@ struct ChatView: View {
         return ids.compactMap { model.center.entry($0) }.filter { $0.capture != nil }
     }
 
-    // MARK: Header
+    // MARK: Thread
 
-    private func header(hasMessages: Bool, busy: Bool) -> some View {
-        HStack(spacing: Space.s) {
-            VStack(alignment: .leading, spacing: 1) {
-                Text("Chat").font(Typeface.rowTitle).foregroundStyle(Palette.ink)
-                Text(entryIDs.count == 1 ? "This video" : "\(entryIDs.count) videos")
-                    .font(Typeface.meta)
-                    .foregroundStyle(Palette.inkTertiary)
+    private func thread(_ messages: [ChatMessage], busy: Bool) -> some View {
+        GeometryReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    threadHeader(messages, busy: busy)
+                    ForEach(messages) { message in
+                        MessageView(
+                            message: message, isLast: message.id == messages.last?.id,
+                            streaming: busy && message.id == messages.last?.id,
+                            assistant: assistant, entryIDs: entryIDs, activeCitation: activeCitation,
+                            askInWindow: model.askInWindow.map { open in { open(entryIDs) } }
+                        )
+                        .transition(.rise)
+                    }
+                }
+                .frame(maxWidth: Space.chatWidth)
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, Space.xl)
+                .padding(.top, Space.xl)
+                .padding(.bottom, 120)
+                .frame(minHeight: proxy.size.height, alignment: .top)
+                .animation(Motion.settle, value: messages.count)
+            }
+            .defaultScrollAnchor(.bottom)
+            .defaultScrollAnchor(.bottom, for: .sizeChanges)
+            .scrollIndicators(.automatic)
+        }
+    }
+
+    private func threadHeader(_ messages: [ChatMessage], busy: Bool) -> some View {
+        HStack(alignment: .top, spacing: Space.m) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title(messages))
+                    .font(Typeface.display)
+                    .tracking(-0.4)
+                    .foregroundStyle(Palette.ink)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(meta(messages)).font(Typeface.meta).foregroundStyle(Palette.inkTertiary)
             }
             Spacer(minLength: Space.s)
-            ProviderMenu(assistant: assistant)
-            if hasMessages {
-                IconButton(symbol: "square.and.pencil", help: "New chat") { assistant.clear(entryIDs) }
-                    .disabled(busy)
-                    .transition(.opacity)
-            }
+            NabButton("New chat", kind: .ghost) { assistant.clear(entryIDs) }
+                .disabled(busy)
+                .help("Start a new chat about these videos")
         }
-        .padding(.horizontal, Space.l)
-        .padding(.vertical, Space.m)
-        .animation(Motion.snap, value: hasMessages)
+    }
+
+    private func title(_ messages: [ChatMessage]) -> String {
+        if entryIDs.count == 1, let video = ordered.first { return video.title }
+        guard let first = messages.first(where: { $0.role == .user }) else { return "\(entryIDs.count) videos" }
+        return first.isSummaryRequest ? "Summary of \(entryIDs.count) videos" : first.text
+    }
+
+    private func meta(_ messages: [ChatMessage]) -> String {
+        let model = messages.last { $0.role == .assistant && !$0.failed }?.model ?? assistant.client.modelLabel
+        let when = messages.first.map { ChatStamp.string(for: $0.date) }
+        return [when, ModelNames.display(model)].compactMap { $0 }.joined(separator: " · ")
     }
 
     // MARK: Empty
@@ -71,7 +112,7 @@ struct ChatView: View {
         return VStack(spacing: Space.l) {
             Image(systemName: "sparkles")
                 .font(Typeface.iconHero)
-                .foregroundStyle(Palette.accent)
+                .foregroundStyle(Palette.accentInk)
                 .frame(width: 48, height: 48)
                 .background(Palette.accentWash, in: .circle)
             VStack(spacing: Space.xs) {
@@ -88,15 +129,17 @@ struct ChatView: View {
                 .multilineTextAlignment(.center)
             }
             if let problem {
-                VStack(spacing: Space.s) {
-                    Text(problem).font(Typeface.body).foregroundStyle(Palette.inkSecondary)
-                    PrimaryButton(title: "Open AI Settings", symbol: "gearshape", action: assistant.openSettings)
-                        .frame(maxWidth: 220)
+                VStack(spacing: Space.m) {
+                    Text(problem)
+                        .font(Typeface.body)
+                        .foregroundStyle(Palette.inkSecondary)
+                        .multilineTextAlignment(.center)
+                    NabButton("Open AI Settings", kind: .primary, size: .large, action: assistant.openSettings)
                 }
                 .padding(.top, Space.s)
             } else {
-                PrimaryButton(title: "Summarize", symbol: "sparkles", enabled: ready) { assistant.summarize(entryIDs) }
-                    .frame(maxWidth: 220)
+                NabButton("Summarize", kind: .primary, size: .large) { assistant.summarize(entryIDs) }
+                    .disabled(!ready)
                     .padding(.top, Space.xs)
                 VStack(spacing: Space.xxs) {
                     ForEach(suggestions, id: \.self) { question in
@@ -106,7 +149,8 @@ struct ChatView: View {
             }
         }
         .padding(.horizontal, Space.xl)
-        .frame(maxWidth: 420)
+        .padding(.bottom, 80)
+        .frame(maxWidth: 460)
     }
 
     private var suggestions: [String] {
@@ -124,36 +168,14 @@ struct ChatView: View {
             ]
     }
 
-    // MARK: Messages
-
-    private func transcript(_ messages: [ChatMessage], busy: Bool) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Space.xl) {
-                ForEach(messages) { message in
-                    MessageView(
-                        message: message, isLast: message.id == messages.last?.id,
-                        streaming: busy && message.id == messages.last?.id,
-                        assistant: assistant, entryIDs: entryIDs
-                    )
-                    .transition(.rise)
-                }
-            }
-            .padding(.horizontal, Space.l)
-            .padding(.vertical, Space.m)
-            .animation(Motion.settle, value: messages.count)
-        }
-        .defaultScrollAnchor(.bottom)
-        .defaultScrollAnchor(.bottom, for: .sizeChanges)
-        .scrollIndicators(.automatic)
-    }
-
     // MARK: Composer
 
     private func composer(busy: Bool) -> some View {
         let canSend = !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !ordered.isEmpty
-        return HStack(alignment: .bottom, spacing: Space.s) {
+        return HStack(alignment: .bottom, spacing: 6) {
             TextField(
-                entryIDs.count == 1 ? "Ask about this video" : "Ask about these videos", text: $draft, axis: .vertical
+                entryIDs.count == 1 ? "Ask about this video" : "Ask about these videos", text: $draft,
+                selection: $selection, axis: .vertical
             )
             .textFieldStyle(.plain)
             .font(Typeface.body)
@@ -161,21 +183,34 @@ struct ChatView: View {
             .lineLimit(1...8)
             .focused($composing)
             .onSubmit(send)
-            .padding(.vertical, 8)
+            .onKeyPress(.return, phases: .down) { press in
+                guard press.modifiers.contains(.option) || press.modifiers.contains(.shift) else { return .ignored }
+                insertNewline()
+                return .handled
+            }
+            .padding(.vertical, 9)
+            .accessibilityLabel("Ask a question")
+            ScopeMenu(ids: entryIDs, model: model)
+                .padding(.bottom, 4)
+            ModelMenu(assistant: assistant)
+                .padding(.bottom, 4)
             SendButton(stop: busy, enabled: busy || canSend) {
                 busy ? assistant.stop(entryIDs) : send()
             }
         }
-        .padding(.leading, 14)
-        .padding(.trailing, 5)
-        .padding(.vertical, 4)
+        .padding(.leading, 18)
+        .padding(.trailing, 8)
+        .padding(.vertical, 8)
         .glassEffect(.regular, in: .rect(cornerRadius: Radius.composer, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: Radius.composer, style: .continuous).strokeBorder(
-                composing ? Palette.accentDim : Palette.hairline)
+            RoundedRectangle(cornerRadius: Radius.composer, style: .continuous)
+                .strokeBorder(composing ? Palette.lineStrong : Palette.line)
         )
+        .shadow(color: .black.opacity(0.28), radius: 20, y: 10)
         .animation(Motion.snap, value: composing)
-        .padding(Space.m)
+        .frame(maxWidth: Space.chatWidth)
+        .padding(.horizontal, Space.xl)
+        .padding(.bottom, 18)
     }
 
     private func send() {
@@ -183,6 +218,17 @@ struct ChatView: View {
             return
         }
         if assistant.ask(draft, about: entryIDs) { draft = "" }
+    }
+
+    /// ⌥Return: a line break at the cursor.
+    private func insertNewline() {
+        if let selection, case .selection(let range) = selection.indices {
+            let offset = draft.distance(from: draft.startIndex, to: range.lowerBound)
+            draft.replaceSubrange(range, with: "\n")
+            self.selection = TextSelection(insertionPoint: draft.index(draft.startIndex, offsetBy: offset + 1))
+        } else {
+            draft += "\n"
+        }
     }
 
     /// Links in an answer that is still being written arrive here. Once an answer is selectable, macOS sends its
@@ -194,13 +240,18 @@ struct ChatView: View {
     }
 }
 
-/// One turn. Questions sit on the right in an accent wash; answers run full width as Markdown.
-private struct MessageView: View {
+/// One turn. Questions sit on the right in a quiet bubble; answers run full width as Markdown.
+struct MessageView: View {
     let message: ChatMessage
     let isLast: Bool
     let streaming: Bool
     let assistant: Assistant
     let entryIDs: [String]
+    var activeCitation: Citation?
+    /// The model name, Copy and Answer again under a finished answer; the floating window leaves them out.
+    var showsActions = true
+    /// Adds "Ask in floating window" to the last answer's actions.
+    var askInWindow: (() -> Void)?
     @State private var hovering = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -224,15 +275,26 @@ private struct MessageView: View {
             Spacer(minLength: 48)
             Group {
                 if message.isSummaryRequest {
-                    Label("Summarize", systemImage: "sparkles").font(Typeface.rowTitle)
+                    Label {
+                        Text("Summarize")
+                    } icon: {
+                        Image(systemName: "sparkles").foregroundStyle(Palette.accentInk)
+                    }
+                    .font(Typeface.rowTitle)
                 } else {
                     Text(message.text).font(Typeface.body).textSelection(.enabled)
                 }
             }
             .foregroundStyle(Palette.ink)
-            .padding(.horizontal, Space.m)
-            .padding(.vertical, Space.s)
-            .background(Palette.accentWash, in: .rect(cornerRadius: Radius.bubble, style: .continuous))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(
+                Palette.selected,
+                in: UnevenRoundedRectangle(
+                    topLeadingRadius: Radius.bubble, bottomLeadingRadius: Radius.bubble, bottomTrailingRadius: 4,
+                    topTrailingRadius: Radius.bubble, style: .continuous)
+            )
+            .frame(maxWidth: 440, alignment: .trailing)
         }
     }
 
@@ -244,16 +306,25 @@ private struct MessageView: View {
                 ThinkingDots(
                     label: entryIDs.count == 1 ? "Reading the transcript" : "Reading \(entryIDs.count) transcripts")
             } else {
-                MarkdownText(source: message.text, clock: reduceMotion ? nil : clock)
+                MarkdownText(source: message.text, clock: reduceMotion ? nil : clock, active: activeCitation)
             }
-            if !streaming, !message.failed {
-                HStack(spacing: Space.xs) {
-                    Text(message.model ?? "").font(Typeface.mono).foregroundStyle(Palette.inkTertiary)
-                    Spacer()
-                    CopyIconButton(text: message.text)
-                    if isLast {
-                        IconButton(symbol: "arrow.clockwise", help: "Answer again") { assistant.regenerate(entryIDs) }
+            if showsActions, !streaming, !message.failed {
+                HStack(spacing: Space.m) {
+                    if let name = message.model {
+                        Text(ModelNames.display(name)).font(Typeface.meta).foregroundStyle(Palette.inkTertiary)
                     }
+                    CopyAction(text: message.text)
+                    if isLast {
+                        MessageAction(title: "Answer again", help: "Ask the last question again") {
+                            assistant.regenerate(entryIDs)
+                        }
+                        if let askInWindow {
+                            MessageAction(title: "Ask in floating window", help: "Continue in the floating AI window") {
+                                askInWindow()
+                            }
+                        }
+                    }
+                    Spacer(minLength: 0)
                 }
                 .opacity(hovering || isLast ? 1 : 0)
             }
@@ -263,7 +334,7 @@ private struct MessageView: View {
     }
 
     private var failure: some View {
-        VStack(alignment: .leading, spacing: Space.s) {
+        VStack(alignment: .leading, spacing: Space.m) {
             Label {
                 Text(message.text).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
             } icon: {
@@ -273,41 +344,87 @@ private struct MessageView: View {
             .foregroundStyle(Palette.error)
             if isLast {
                 HStack(spacing: Space.s) {
-                    Button("Try Again", systemImage: "arrow.clockwise") { assistant.regenerate(entryIDs) }
-                    Button("AI Settings", systemImage: "gearshape", action: assistant.openSettings)
+                    NabButton("Try Again") { assistant.regenerate(entryIDs) }
+                    NabButton("AI Settings", kind: .ghost, action: assistant.openSettings)
                 }
-                .buttonStyle(.glass)
-                .font(Typeface.rowTitle)
             }
         }
     }
 }
 
-/// Switch provider without opening Settings.
-private struct ProviderMenu: View {
+/// The model chip: models of the current provider, the provider itself, and a way into Settings.
+/// Also meant for the floating AI window.
+struct ModelMenu: View {
     @Bindable var assistant: Assistant
 
     var body: some View {
-        Menu {
-            Picker("Provider", selection: $assistant.settings.kind) {
-                ForEach(ProviderKind.allCases) { Text($0.title).tag($0) }
+        let kind = assistant.settings.kind
+        let choices = ModelNames.choices(for: kind)
+        MenuChip(title: title) {
+            if !choices.isEmpty {
+                Picker("Model", selection: $assistant.settings.model) {
+                    ForEach(choices, id: \.self) { Text(ModelNames.display($0)).tag($0) }
+                }
+                .pickerStyle(.inline)
+                .labelsHidden()
+                Divider()
             }
-            .pickerStyle(.inline)
-            Divider()
+            Menu("Provider") {
+                Picker("Provider", selection: $assistant.settings.kind) {
+                    ForEach(ProviderKind.allCases) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.inline)
+                .labelsHidden()
+            }
             Button("AI Settings…", action: assistant.openSettings)
-        } label: {
-            HStack(spacing: 4) {
-                Text(assistant.client.modelLabel).lineLimit(1)
-                Image(systemName: "chevron.down").font(Typeface.iconMicro)
-            }
-            .font(Typeface.label)
-            .foregroundStyle(Palette.inkSecondary)
         }
-        .menuStyle(.button)
-        .buttonStyle(.plain)
-        .menuIndicator(.hidden)
-        .fixedSize()
         .help("Model")
+    }
+
+    private var title: String {
+        let settings = assistant.settings
+        let model = settings.model.trimmingCharacters(in: .whitespaces)
+        if model.isEmpty { return settings.kind.isCLI ? "Default model" : settings.kind.title }
+        return ModelNames.display(model)
+    }
+}
+
+/// Which videos a question is about: all of the session, or one of them.
+private struct ScopeMenu: View {
+    let ids: [String]
+    let model: LibraryModel
+
+    /// The videos to choose from: this page's, or the open session's when the page shows one of them.
+    private var pool: [String] {
+        if ids.count > 1 { return ids }
+        let session = model.currentSessionIDs()
+        return session.count > 1 && session.contains(ids.first ?? "") ? session : ids
+    }
+
+    var body: some View {
+        let pool = pool
+        if pool.count > 1 {
+            MenuChip(title: ids.count > 1 ? "All \(ids.count) videos" : "This video") {
+                Button {
+                    model.go(.session(pool))
+                } label: {
+                    row("All \(pool.count) videos", on: ids.count > 1)
+                }
+                Divider()
+                ForEach(Array(pool.enumerated()), id: \.element) { index, id in
+                    Button {
+                        model.go(.session([id]))
+                    } label: {
+                        row("\(index + 1) · \(model.center.entry(id)?.title ?? id)", on: ids == [id])
+                    }
+                }
+            }
+            .help("Which videos to ask about")
+        }
+    }
+
+    @ViewBuilder private func row(_ title: String, on: Bool) -> some View {
+        if on { Label(title, systemImage: "checkmark") } else { Text(title) }
     }
 }
 
@@ -338,35 +455,65 @@ private struct SuggestionRow: View {
     }
 }
 
-private struct SendButton: View {
+struct SendButton: View {
     let stop: Bool
     let enabled: Bool
+    var size: CGFloat = 36
+    /// A plain control circle instead of dimmed lime when nothing can be sent.
+    var neutralWhenIdle = false
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             Image(systemName: stop ? "stop.fill" : "arrow.up")
-                .font(stop ? Typeface.iconSmall : Typeface.iconSend)
+                .font(stop ? Typeface.iconAction : Typeface.iconButton)
                 .contentTransition(.symbolEffect(.replace))
-                .foregroundStyle(stop ? Palette.ink : Palette.onAccent)
-                .frame(width: 28, height: 28)
-                .background(stop ? Palette.pressed : (enabled ? Palette.accent : Palette.accentFaint), in: .circle)
+                .foregroundStyle(enabled ? Palette.onAccent : Palette.inkTertiary)
+                .frame(width: size, height: size)
+                .background(
+                    enabled ? Palette.accent : (neutralWhenIdle ? Palette.control : Palette.accentSoft), in: .circle
+                )
                 .contentShape(.circle)
         }
         .buttonStyle(PressableStyle())
         .disabled(!enabled)
-        .padding(.bottom, 2)
         .animation(Motion.snap, value: stop)
+        .animation(Motion.snap, value: enabled)
+        .accessibilityLabel(stop ? "Stop" : "Send")
         .help(stop ? "Stop" : "Send (Return) · new line: ⌥Return")
     }
 }
 
-private struct CopyIconButton: View {
+/// A quiet text action under an answer.
+private struct MessageAction: View {
+    let title: String
+    var symbol: String?
+    let help: String
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                if let symbol { Image(systemName: symbol).font(Typeface.iconSmall) }
+                Text(title).font(Typeface.meta)
+            }
+            .foregroundStyle(hovering ? Palette.accentInk : Palette.inkTertiary)
+            .contentShape(.rect)
+        }
+        .buttonStyle(PressableStyle(scale: 0.96))
+        .onHover { over in withAnimation(Motion.snap) { hovering = over } }
+        .help(help)
+        .accessibilityLabel(title)
+    }
+}
+
+private struct CopyAction: View {
     let text: String
     @State private var copied = false
 
     var body: some View {
-        IconButton(symbol: copied ? "checkmark" : "doc.on.doc", help: "Copy answer") {
+        MessageAction(title: copied ? "Copied" : "Copy", symbol: copied ? "checkmark" : nil, help: "Copy answer") {
             Pasteboard.copy(text)
             withAnimation(Motion.snap) { copied = true }
             Task {
@@ -377,7 +524,7 @@ private struct CopyIconButton: View {
     }
 }
 
-private struct ThinkingDots: View {
+struct ThinkingDots: View {
     let label: String
 
     var body: some View {

@@ -14,6 +14,8 @@ final class StatusController {
         /// Opens the library's chat on these entries and summarizes them.
         let summarize: ([String]) -> Void
         let openSettings: () -> Void
+        let copyAll: () -> Void
+        let newSession: () -> Void
     }
 
     private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -22,15 +24,18 @@ final class StatusController {
     private var monitors: [Any] = []
     private let light = CAShapeLayer()
     private var lastInFlight = 0
+    private var iconWidth = Glyph.width
 
     init(center: CaptureCenter, actions: Actions) {
         self.center = center
-        item.button?.image = Self.icon
+        item.button?.image = Self.makeIcon(count: 0, fetching: false)
         item.button?.setAccessibilityLabel("Nab")
         item.button?.target = self
         item.button?.action = #selector(toggle)
         installLight()
-        panel = FloatingPanel(size: NSSize(width: PanelMetrics.width, height: PanelMetrics.height(rows: 0))) {
+        panel = FloatingPanel(
+            size: NSSize(width: PanelMetrics.width, height: PanelMetrics.height(rows: 0, earlier: false))
+        ) {
             MenuPanelView(
                 center: center,
                 actions: Actions(
@@ -54,15 +59,30 @@ final class StatusController {
                     openSettings: { [weak self] in
                         self?.close()
                         actions.openSettings()
+                    },
+                    copyAll: { [weak self] in
+                        self?.close()
+                        actions.copyAll()
+                    },
+                    newSession: { [weak self] in
+                        self?.close()
+                        actions.newSession()
                     }))
         }
         observe { [weak self] in
             guard let self else { return }
-            self.panel.setHeight(PanelMetrics.height(rows: self.center.tray.count))
+            self.panel.setHeight(
+                PanelMetrics.height(
+                    rows: self.center.tray.count,
+                    earlier: RackText.earlierTodayCount(self.center.entries) > 0))
         }
         observe { [weak self] in
             guard let self else { return }
             self.updateLight(inFlight: self.center.inFlight)
+        }
+        observe { [weak self] in
+            guard let self else { return }
+            self.updateBadge(count: self.center.session.count, fetching: self.center.inFlight > 0)
         }
     }
 
@@ -73,11 +93,20 @@ final class StatusController {
     }
 
     @objc private func toggle() {
-        panel.isVisible ? close() : open()
+        isShown ? close() : open()
+    }
+
+    /// A panel on its way out counts as closed, so the next click or `nab://menu` opens it again.
+    private var isShown: Bool { panel.isVisible && !panel.isClosing }
+
+    /// Opens the panel if it is closed (`nab://menu`).
+    func show() {
+        if !isShown { open() }
     }
 
     private func open() {
-        panel.place(below: anchorRect)
+        removeMonitors()
+        if !panel.isVisible { panel.place(below: anchorRect) }
         panel.present()
         panel.makeKey()
         monitors.append(
@@ -86,7 +115,8 @@ final class StatusController {
             } as Any)
         monitors.append(
             NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-                if event.keyCode == UInt16(kVK_Escape) {
+                // Only the panel's own Esc; in the library or the floating window it belongs to them.
+                if event.keyCode == UInt16(kVK_Escape), event.window === self?.panel {
                     self?.close()
                     return nil
                 }
@@ -95,54 +125,131 @@ final class StatusController {
     }
 
     private func close() {
+        removeMonitors()
+        panel.dismiss()
+    }
+
+    private func removeMonitors() {
         monitors.forEach(NSEvent.removeMonitor)
         monitors = []
-        panel.dismiss()
     }
 
     // MARK: Icon
 
-    /// The app icon's mark on an 18 pt square, y up: three transcript rows, a caret, and the quote pulled out
-    /// between them. Rows and quote keep the icon's 2:3 weight; every edge lands on the 2x pixel grid.
+    /// The app icon's mark on an 18 pt tall canvas: two quotes with their tails, the left one lime and the
+    /// right one in the menu bar's ink. Coordinates are the board's 64-unit mark, drawn y down.
     private enum Glyph {
-        static let rows = [
-            NSRect(x: 0.5, y: 13.5, width: 14.5, height: 2),
-            NSRect(x: 0.5, y: 10, width: 11.5, height: 2),
-            NSRect(x: 0.5, y: 2, width: 7, height: 2),
-        ]
-        static let caret = NSRect(x: 0.5, y: 4.5, width: 1, height: 5)
-        static let quote = NSRect(x: 2.5, y: 5.5, width: 15, height: 3)
+        static let width: CGFloat = 16
+        static let height: CGFloat = 18
+        /// 44 units of mark (head edge to head edge, both quotes) fit 15.84 pt.
+        static let scale: CGFloat = 0.36
+        /// Where the mark starts in the 64-unit space, and its vertical middle.
+        static let originX: CGFloat = 11.5
+        static let middleY: CGFloat = 32.5
+
+        /// One quote (a round head flowing into a tapered tail) as a filled path; `side` 0 is the left one,
+        /// 1 the right. `flipped` mirrors y for layers whose y axis points down.
+        static func quote(side: Int, flipped: Bool = false) -> CGPath {
+            let cx = 21.5 + CGFloat(side) * 24
+            let cy: CGFloat = 25
+            let path = CGMutablePath()
+            path.move(to: CGPoint(x: cx - 10, y: cy))
+            path.addArc(
+                center: CGPoint(x: cx, y: cy), radius: 10, startAngle: .pi, endAngle: 2 * .pi, clockwise: false)
+            path.addCurve(
+                to: CGPoint(x: cx - 13, y: cy + 25), control1: CGPoint(x: cx + 10, y: cy + 11),
+                control2: CGPoint(x: cx + 4, y: cy + 19.5))
+            path.addCurve(
+                to: CGPoint(x: cx - 10, y: cy), control1: CGPoint(x: cx - 7, y: cy + 16),
+                control2: CGPoint(x: cx - 10, y: cy + 10))
+            path.closeSubpath()
+            let d = flipped ? scale : -scale
+            var transform = CGAffineTransform(
+                a: scale, b: 0, c: 0, d: d, tx: -originX * scale, ty: height / 2 - d * middleY)
+            return path.copy(using: &transform) ?? path
+        }
     }
 
-    static let icon: NSImage = {
-        let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { _ in
-            Palette.nsTemplateInk.set()
-            for rect in Glyph.rows + [Glyph.caret, Glyph.quote] {
-                let radius = min(rect.width, rect.height) / 2
-                NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius).fill()
+    /// The lime for the menu bar, resolved when drawing: the dark-bar lime on dark, the darker lime-ink on
+    /// light, so the mark stays readable on either.
+    private static func markLime(dark: Bool) -> NSColor {
+        dark ? Palette.nsAccent : NSColor(srgbRed: 0x4B / 255, green: 0x7A / 255, blue: 0x0E / 255, alpha: 1)
+    }
+
+    /// The icon, with the session's video count drawn to its right when there is one. Not a template: the
+    /// handler resolves colors for whichever menu bar it is drawn on. While fetching, the left quote is left
+    /// out because the breathing light layer draws it.
+    private static func makeIcon(count: Int, fetching: Bool) -> NSImage {
+        let digits = NSAttributedString(
+            string: "\(count)",
+            attributes: [.font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold)])
+        let textWidth = count > 0 ? ceil(digits.size().width) : 0
+        let width = Glyph.width + (count > 0 ? 4 + textWidth : 0)
+        let image = NSImage(size: NSSize(width: width, height: Glyph.height), flipped: false) { _ in
+            let dark = NSAppearance.currentDrawing().bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            guard let context = NSGraphicsContext.current?.cgContext else { return false }
+            if !fetching {
+                context.addPath(Glyph.quote(side: 0))
+                context.setFillColor(markLime(dark: dark).cgColor)
+                context.fillPath()
+            }
+            context.addPath(Glyph.quote(side: 1))
+            context.setFillColor(NSColor.labelColor.cgColor)
+            context.fillPath()
+            if count > 0 {
+                let ink = NSMutableAttributedString(attributedString: digits)
+                ink.addAttribute(
+                    .foregroundColor, value: NSColor.labelColor, range: NSRange(location: 0, length: ink.length))
+                ink.draw(at: NSPoint(x: Glyph.width + 4, y: (Glyph.height - ink.size().height) / 2))
             }
             return true
         }
-        image.isTemplate = true
+        image.isTemplate = false
         return image
-    }()
+    }
 
-    /// The light is the quote itself: drawn out from the caret in orange and pulsing while fetches run, then a
-    /// short green flash when the last one lands.
+    private func updateBadge(count: Int, fetching: Bool) {
+        guard let button = item.button else { return }
+        let image = Self.makeIcon(count: count, fetching: fetching)
+        iconWidth = image.size.width
+        item.length = count > 0 ? NSStatusItem.variableLength : NSStatusItem.squareLength
+        button.image = image
+        button.setAccessibilityLabel(count > 0 ? "Nab, \(count) in session" : "Nab")
+        // The button resizes on the next layout pass; the light follows the image, which stays centred.
+        DispatchQueue.main.async { [weak self] in self?.placeLight() }
+    }
+
+    /// The light is the left quote itself: it breathes while fetches run, and flashes in the menu bar's ink
+    /// when the last one lands.
     private func installLight() {
         guard let button = item.button else { return }
         button.wantsLayer = true
-        let b = button.bounds
-        let quote = Glyph.quote
-        // The image sits centred in the button; the layer shares the button's axes, which may point down.
-        let y = button.isFlipped ? b.midY + 9 - quote.maxY : b.midY - 9 + quote.minY
-        light.anchorPoint = CGPoint(x: 0, y: 0.5)
-        light.frame = CGRect(x: b.midX - 9 + quote.minX, y: y, width: quote.width, height: quote.height)
-        light.path = CGPath(
-            roundedRect: CGRect(origin: .zero, size: quote.size), cornerWidth: quote.height / 2,
-            cornerHeight: quote.height / 2, transform: nil)
         light.opacity = 0
+        placeLight()
         button.layer?.addSublayer(light)
+    }
+
+    /// The image sits centred in the button; the layer shares the button's axes, which may point down.
+    private func placeLight() {
+        guard let button = item.button else { return }
+        let b = button.bounds
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        light.frame = CGRect(
+            x: b.midX - iconWidth / 2, y: b.midY - Glyph.height / 2, width: Glyph.width, height: Glyph.height)
+        light.path = Glyph.quote(side: 0, flipped: button.isFlipped)
+        light.fillColor = lightColor(fetching: true)
+        CATransaction.commit()
+    }
+
+    private func lightColor(fetching: Bool) -> CGColor {
+        var color = Palette.nsAccent.cgColor
+        let appearance = item.button?.effectiveAppearance ?? NSApp.effectiveAppearance
+        appearance.performAsCurrentDrawingAppearance {
+            let dark = NSAppearance.currentDrawing().bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            color = (fetching ? Self.markLime(dark: dark) : NSColor.labelColor).cgColor
+        }
+        return color
     }
 
     private func updateLight(inFlight: Int) {
@@ -150,15 +257,15 @@ final class StatusController {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         if inFlight > 0 {
-            light.fillColor = Palette.nsAccent.cgColor
+            light.fillColor = lightColor(fetching: true)
             let still = LightMotion.reduceMotion
             if light.opacity == 0 {
                 light.opacity = 1
                 if !still {
                     let pop = WindowMotion.layerSpring(
                         response: WindowMotion.popResponse, damping: WindowMotion.popDamping)
-                    pop.keyPath = "transform.scale.x"
-                    pop.fromValue = 0.1
+                    pop.keyPath = "transform.scale"
+                    pop.fromValue = 0.6
                     pop.toValue = 1
                     light.add(pop, forKey: "pop")
                 }
@@ -170,11 +277,11 @@ final class StatusController {
             }
         } else if lastInFlight > 0 {
             light.removeAnimation(forKey: "breathe")
-            light.fillColor = Palette.nsOK.cgColor
+            light.fillColor = lightColor(fetching: false)
             let fade = CABasicAnimation(keyPath: "opacity")
             fade.fromValue = 1
             fade.toValue = 0
-            fade.beginTime = CACurrentMediaTime() + 0.6
+            fade.beginTime = CACurrentMediaTime() + 0.4
             fade.duration = 0.15
             fade.fillMode = .backwards
             light.opacity = 0
@@ -184,23 +291,24 @@ final class StatusController {
     }
 }
 
+// MARK: Panel
+
 private struct MenuPanelView: View {
     let center: CaptureCenter
     let actions: StatusController.Actions
-    @State private var hoveredTool: String?
 
     var body: some View {
         let tray = center.tray
+        let earlier = RackText.earlierTodayCount(center.entries)
         VStack(spacing: PanelMetrics.gap) {
-            tools
-                .frame(height: PanelMetrics.toolsHeight)
-                .cell()
-            TrayCell(center: center, tray: tray, actions: actions)
-                .frame(height: PanelMetrics.trayHeight(rows: tray.count))
-                .cell()
-            footer
-                .frame(height: PanelMetrics.footerHeight)
-                .cell()
+            SessionCell(center: center, tray: tray, actions: actions)
+                .frame(height: PanelMetrics.sessionHeight(rows: tray.count))
+                .background(Palette.raised, in: .rect(cornerRadius: Radius.cell, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: Radius.cell, style: .continuous).strokeBorder(Palette.line))
+            actionButtons(tray)
+                .frame(height: PanelMetrics.actionsHeight)
+            menu(earlier: earlier)
+                .frame(height: PanelMetrics.menuHeight(earlier: earlier > 0))
         }
         .padding(PanelMetrics.ring)
         .frame(width: PanelMetrics.width)
@@ -209,73 +317,59 @@ private struct MenuPanelView: View {
         .animation(Motion.settle, value: tray.count)
     }
 
-    private var tools: some View {
-        HStack(spacing: 0) {
-            ToolTile(
-                symbol: "viewfinder", title: "Front Tab", shortcut: center.shortcutAvailable ? "⌃⌥N" : "no shortcut",
-                hovered: $hoveredTool,
-                action: actions.nabFrontTab)
-            ToolTile(
-                symbol: "clipboard", title: "Paste", shortcut: "links", hovered: $hoveredTool,
-                action: actions.pasteLinks)
-            ToolTile(
-                symbol: "square.and.arrow.down", title: "Export", shortcut: ".md",
-                enabled: !center.trayCaptures.isEmpty,
-                hovered: $hoveredTool, action: actions.exportTray)
-            ToolTile(symbol: "rectangle.stack", title: "Library", hovered: $hoveredTool) { actions.openLibrary(nil) }
+    private func actionButtons(_ tray: [Entry]) -> some View {
+        let ready = tray.contains { $0.capture != nil }
+        let unavailable = center.unavailableShortcuts
+        func key(_ shortcut: String) -> String? { unavailable.contains(shortcut) ? nil : shortcut }
+        return HStack(spacing: PanelMetrics.gap) {
+            ActionTile(label: "Copy all", shortcut: key("⌃⌥A"), enabled: ready, action: actions.copyAll)
+            ActionTile(
+                label: "Ask AI", shortcut: key("⌃⌥S"), primary: true, enabled: ready
+            ) {
+                actions.summarize(center.sessionSummaryIDs())
+            }
+            ActionTile(label: "New session", shortcut: key("⌃⌥X"), enabled: !tray.isEmpty, action: actions.newSession)
         }
-        .padding(.horizontal, Space.s)
     }
 
-    private var footer: some View {
-        HStack(spacing: Space.s) {
-            Image(nsImage: StatusController.icon)
-                .renderingMode(.template)
-                .foregroundStyle(Palette.ink)
-                .frame(width: 18, height: 18)
-            VStack(alignment: .leading, spacing: 0) {
-                Text("Nab").font(Typeface.button).foregroundStyle(Palette.ink)
-                Text("\(center.entries.count) in library").font(Typeface.mono).foregroundStyle(Palette.inkTertiary)
-                    .contentTransition(.numericText())
+    private func menu(earlier: Int) -> some View {
+        VStack(spacing: 0) {
+            MenuRow(
+                label: "Nab the YouTube tab in front", trailing: center.shortcutAvailable ? "⌃⌥N" : "no shortcut",
+                action: actions.nabFrontTab)
+            MenuRow(label: "Paste links", action: actions.pasteLinks)
+            MenuRow(label: "Export session…", enabled: !center.trayCaptures.isEmpty, action: actions.exportTray)
+            if earlier > 0 {
+                MenuRow(label: RackText.earlierToday(count: earlier), trailing: "›") { actions.openLibrary(nil) }
             }
-            Spacer(minLength: 6)
-            IconButton(symbol: "gearshape", help: "Settings") { actions.openSettings() }
-            IconButton(symbol: "power", help: "Quit Nab") { NSApp.terminate(nil) }
+            Rectangle().fill(Palette.line).frame(height: 1).padding(.horizontal, Space.s).padding(.vertical, 4)
+            MenuRow(label: "Open Library") { actions.openLibrary(nil) }
+            MenuRow(label: "Settings…", trailing: "⌘,", action: actions.openSettings)
+            MenuRow(label: "Quit Nab", trailing: "⌘Q") { NSApp.terminate(nil) }
         }
-        .padding(.horizontal, 10)
+        .padding(.vertical, PanelMetrics.menuPadding)
     }
 }
 
-private struct TrayCell: View {
+private struct SessionCell: View {
     let center: CaptureCenter
     let tray: [Entry]
     let actions: StatusController.Actions
 
     var body: some View {
-        let ready = tray.compactMap(\.capture)
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: Space.s) {
-                SectionLabel("Tray")
-                if !tray.isEmpty {
-                    Text(summary(ready))
-                        .font(Typeface.mono)
-                        .foregroundStyle(Palette.inkTertiary)
-                        .contentTransition(.numericText())
-                }
-                Spacer()
-                if !tray.isEmpty { LinkButton(title: "Clear", action: center.clearTray) }
-            }
-            .frame(height: PanelMetrics.headerHeight)
-            .padding(.bottom, Space.s)
-
+        VStack(alignment: .leading, spacing: PanelMetrics.headerGap) {
+            header
+                .frame(height: PanelMetrics.headerHeight)
             Group {
                 if tray.isEmpty {
                     empty
                 } else {
                     ScrollView {
-                        LazyVStack(spacing: PanelMetrics.rowSpacing) {
+                        VStack(spacing: 0) {
                             ForEach(tray) { entry in
-                                TrayRow(entry: entry, center: center, actions: actions) {
+                                TrayRow(
+                                    entry: entry, onClipboard: entry.id == clipboardID, center: center, actions: actions
+                                ) {
                                     actions.openLibrary(entry.id)
                                 }
                                 .transition(.rise)
@@ -287,49 +381,53 @@ private struct TrayCell: View {
                 }
             }
             .frame(height: PanelMetrics.listHeight(rows: tray.count))
-            .padding(.bottom, PanelMetrics.listGap)
-
-            HStack(spacing: Space.s) {
-                PrimaryButton(
-                    title: center.inFlight > 0 ? "Fetching…" : "Copy Context",
-                    symbol: center.inFlight > 0 ? "hourglass" : "doc.on.doc",
-                    trailing: ready.isEmpty ? nil : "\(ready.count)",
-                    enabled: !ready.isEmpty,
-                    action: center.copyTray)
-                SecondaryIconButton(
-                    symbol: "sparkles", help: "Summarize and chat about the tray", enabled: !ready.isEmpty
-                ) {
-                    actions.summarize(tray.filter { $0.capture != nil }.map(\.id))
-                }
-            }
         }
         .padding(PanelMetrics.cellPadding)
         .frameProbe("tray.insert", Double(tray.count))
         .animation(Motion.settle, value: tray.map(\.id))
     }
 
-    private var empty: some View {
-        VStack(spacing: Space.xs) {
-            Text(
-                center.shortcutAvailable
-                    ? "Press ⌃⌥N with a YouTube video in front."
-                    : "⌃⌥N is in use by another app. Use Front Tab above.")
-            Text("Nabbed videos gather here, ready to copy as one context.")
+    /// The entry whose context the auto-copy last put on the clipboard: the newest of those it copied.
+    private var clipboardID: String? { tray.first { center.copiedIDs.contains($0.id) }?.id }
+
+    private var header: some View {
+        HStack(spacing: Space.s) {
+            LiveDot()
+            Text("This session").font(Typeface.rowTitle).foregroundStyle(Palette.ink)
+            if !tray.isEmpty {
+                Text(RackText.videos(tray.count))
+                    .font(Typeface.meta)
+                    .foregroundStyle(Palette.inkTertiary)
+                    .contentTransition(.numericText())
+            }
+            Spacer(minLength: Space.s)
+            if let start = tray.map(\.addedAt).min() {
+                Text("since \(start.formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute()))")
+                    .font(Typeface.meta)
+                    .foregroundStyle(Palette.inkTertiary)
+            }
         }
-        .font(Typeface.meta)
-        .foregroundStyle(Palette.inkTertiary)
-        .multilineTextAlignment(.center)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.horizontal, 2)
+        .accessibilityElement(children: .combine)
     }
 
-    private func summary(_ captures: [Capture]) -> String {
-        let total = captures.compactMap(\.duration).reduce(0, +)
-        return total > 0 ? "\(tray.count) · \(Timecode.string(total))" : "\(tray.count)"
+    private var empty: some View {
+        Text(
+            center.shortcutAvailable
+                ? "Press ⌃⌥N with a YouTube video in front, and it lands here."
+                : "Nab the tab from the list below; ⌃⌥N is in use by another app."
+        )
+        .font(Typeface.meta)
+        .foregroundStyle(Palette.inkTertiary)
+        .multilineTextAlignment(.leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .padding(.horizontal, 2)
     }
 }
 
 private struct TrayRow: View {
     let entry: Entry
+    let onClipboard: Bool
     let center: CaptureCenter
     let actions: StatusController.Actions
     let action: () -> Void
@@ -338,30 +436,27 @@ private struct TrayRow: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 10) {
-                Thumb(entry: entry)
+                Thumbnail(entry: entry, width: 56, radius: Radius.chip)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(entry.title)
-                        .font(Typeface.rowTitle)
+                        .font(Typeface.button)
                         .foregroundStyle(Palette.ink)
                         .lineLimit(1)
-                    Text(entry.metaLine)
-                        .font(Typeface.meta)
-                        .foregroundStyle(entry.phase == .failed ? Palette.error : Palette.inkTertiary)
-                        .lineLimit(1)
-                        .contentTransition(.opacity)
+                    status.contentTransition(.opacity)
                 }
-                Spacer(minLength: Space.xs)
-                Text(entry.durationText)
-                    .font(Typeface.mono)
-                    .foregroundStyle(Palette.inkTertiary)
+                Spacer(minLength: 0)
             }
-            .padding(Space.xs)
+            .padding(.horizontal, 2)
+            .padding(.vertical, 4)
             .frame(height: PanelMetrics.rowHeight)
             .background(hovering ? Palette.hover : .clear, in: .rect(cornerRadius: Radius.row, style: .continuous))
             .contentShape(.rect)
         }
         .buttonStyle(PressableStyle(scale: 0.98))
         .onHover { over in withAnimation(Motion.snap) { hovering = over } }
+        .animation(Motion.snap, value: entry.phase)
+        .accessibilityLabel("\(entry.title), \(statusText)")
+        .accessibilityHint("Opens it in the library")
         .contextMenu {
             if entry.phase == .failed { Button("Try Again") { center.retry(entry.id) } }
             Button("Open Video") { NSWorkspace.shared.open(entry.url) }
@@ -371,36 +466,140 @@ private struct TrayRow: View {
                 Button("Copy Context") { Pasteboard.copy(ContextPack.render([capture])) }
             }
             Divider()
-            Button("Remove from Tray") { center.removeFromTray(entry.id) }
+            Button("Remove from Session") { center.removeFromTray(entry.id) }
         }
+    }
+
+    private var statusText: String {
+        switch entry.phase {
+        case .fetching: "Fetching captions…"
+        case .failed: entry.failure ?? "Failed"
+        case .ready: onClipboard ? "On clipboard" : entry.detailLine
+        }
+    }
+
+    @ViewBuilder private var status: some View {
+        HStack(spacing: 5) {
+            switch entry.phase {
+            case .fetching:
+                LimeSpinner(size: 9)
+                Text(statusText).foregroundStyle(Palette.inkSecondary)
+            case .failed:
+                Text(statusText).foregroundStyle(Palette.error)
+            case .ready:
+                if onClipboard {
+                    Image(systemName: "checkmark").font(Typeface.iconMicro).foregroundStyle(Palette.accentInk)
+                    Text(statusText).foregroundStyle(Palette.ink)
+                } else {
+                    Text(statusText).foregroundStyle(Palette.inkTertiary)
+                }
+            }
+        }
+        .font(Typeface.meta)
+        .lineLimit(1)
     }
 }
 
-/// A 40 pt round companion to the primary button: glass fill, hairline border, brightens on hover.
-private struct SecondaryIconButton: View {
-    let symbol: String
-    let help: String
+/// A small spinner: a soft track with a lime arc turning on it. Still when Reduce Motion is on.
+struct LimeSpinner: View {
+    var size: CGFloat = 9
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        TimelineView(.animation(paused: reduceMotion)) { timeline in
+            let angle =
+                reduceMotion
+                ? 0 : timeline.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 0.9) / 0.9 * 360
+            ZStack {
+                Circle().stroke(Palette.accentSoft, lineWidth: 1.5)
+                Circle().trim(from: 0, to: 0.25).stroke(
+                    Palette.accentInk, style: .init(lineWidth: 1.5, lineCap: .round)
+                )
+                .rotationEffect(.degrees(angle - 90))
+            }
+        }
+        .frame(width: size, height: size)
+        .accessibilityHidden(true)
+    }
+}
+
+/// One of the three equal buttons under the session: a label over its shortcut.
+private struct ActionTile: View {
+    let label: String
+    var shortcut: String?
+    var primary = false
     var enabled = true
     let action: () -> Void
     @State private var hovering = false
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: symbol)
-                .font(Typeface.iconButton)
-                .foregroundStyle(enabled ? (hovering ? Palette.accent : Palette.ink) : Palette.inkTertiary)
-                .scaleEffect(hovering && enabled ? 1.1 : 1)
-                .frame(width: PanelMetrics.buttonHeight, height: PanelMetrics.buttonHeight)
-                .background(Circle().fill(hovering && enabled ? Palette.controlHover : Palette.control))
-                .overlay(
-                    Circle().strokeBorder(
-                        hovering && enabled ? Palette.controlBorderHover : Palette.controlBorder, lineWidth: 1)
-                )
-                .contentShape(.circle)
+            VStack(spacing: 3) {
+                Text(label).font(Typeface.button)
+                if let shortcut {
+                    Text(shortcut).font(Typeface.chip).opacity(primary ? 0.62 : 1)
+                        .foregroundStyle(primary ? Palette.onAccent : Palette.inkTertiary)
+                }
+            }
+            .foregroundStyle(primary ? Palette.onAccent : Palette.ink)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(fill, in: .rect(cornerRadius: Radius.row, style: .continuous))
+            .overlay {
+                if !primary {
+                    RoundedRectangle(cornerRadius: Radius.row, style: .continuous).strokeBorder(Palette.line)
+                }
+            }
+            .contentShape(.rect(cornerRadius: Radius.row, style: .continuous))
         }
-        .buttonStyle(PressableStyle(scale: 0.94))
+        .buttonStyle(PressableStyle(scale: 0.97))
         .disabled(!enabled)
-        .help(help)
+        .opacity(enabled ? 1 : 0.45)
         .onHover { over in withAnimation(Motion.snap) { hovering = over } }
+        .accessibilityLabel(label)
+    }
+
+    private var fill: Color {
+        if primary { return hovering ? Palette.accent.opacity(0.9) : Palette.accent }
+        return hovering ? Palette.selected : Palette.raised
+    }
+}
+
+/// A line of the list under the buttons: label, optional shortcut or chevron, hover fill.
+private struct MenuRow: View {
+    let label: String
+    var trailing: String?
+    var enabled = true
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack {
+                Text(label).font(Typeface.body).foregroundStyle(Palette.ink)
+                Spacer(minLength: Space.s)
+                if let trailing {
+                    Text(trailing).font(Typeface.mono).foregroundStyle(Palette.inkTertiary)
+                }
+            }
+            .padding(.horizontal, 10)
+            .frame(height: PanelMetrics.menuRowHeight)
+            .background(hovering && enabled ? Palette.hover : .clear, in: .rect(cornerRadius: 8, style: .continuous))
+            .contentShape(.rect)
+        }
+        .buttonStyle(PressableStyle(scale: 0.99))
+        .disabled(!enabled)
+        .opacity(enabled ? 1 : 0.45)
+        .onHover { over in withAnimation(Motion.snap) { hovering = over } }
+    }
+}
+
+extension Entry {
+    /// "Turkish · ~13k tokens": the line under a finished video in the panel and the rack.
+    var detailLine: String {
+        guard let capture else { return "" }
+        let characters = capture.transcript?.segments.reduce(0) { $0 + $1.text.utf8.count + 1 }
+        return RackText.detail(
+            language: capture.transcript?.languageName,
+            tokens: characters.map { RackText.estimatedTokens(characters: $0) })
     }
 }

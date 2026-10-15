@@ -85,15 +85,16 @@ struct MarkdownDocument {
     let blocks: [Block]
     let length: Int
 
-    init(_ source: String) {
+    init(_ source: String, active: Citation? = nil) {
         var blocks: [Block] = []
         var offset = 0
         for kind in MarkdownBlock.parse(source) {
             let text: AttributedString
             switch kind {
-            case .heading(let raw): text = MarkdownText.styled(raw, strong: Typeface.heading)
-            case .paragraph(let raw), .quote(let raw): text = MarkdownText.styled(raw, strong: Typeface.readingStrong)
-            case .item(_, let raw, _): text = MarkdownText.styled(raw, strong: Typeface.readingStrong)
+            case .heading(let raw): text = MarkdownText.styled(raw, strong: Typeface.chatStrong, active: active)
+            case .paragraph(let raw), .quote(let raw):
+                text = MarkdownText.styled(raw, strong: Typeface.chatStrong, active: active)
+            case .item(_, let raw, _): text = MarkdownText.styled(raw, strong: Typeface.chatStrong, active: active)
             case .code(let raw): text = AttributedString(raw)
             case .rule: text = AttributedString(" ")
             }
@@ -110,11 +111,13 @@ extension MarkdownBlock {
     fileprivate var isItem: Bool { if case .item = self { true } else { false } }
 }
 
-/// Renders an answer. Timecodes become links the chat handles through `openURL`. With a clock, the
-/// text writes itself in at the display's rate; without one it is drawn as is.
+/// Renders an answer. Timecodes become chips the chat handles through `openURL`; the one that matches `active`
+/// (the passage open in the transcript drawer) is filled. With a clock, the text writes itself in at the
+/// display's rate; without one it is drawn as is.
 struct MarkdownText: View {
     let source: String
     var clock: RevealClock?
+    var active: Citation?
 
     var body: some View {
         Group {
@@ -122,16 +125,16 @@ struct MarkdownText: View {
                 // Selectable text is drawn by AppKit and skips custom renderers, so selection waits
                 // until the answer has written itself in. A half-streamed answer also closes its
                 // open bold and code spans instead of showing raw markers.
-                let document = MarkdownDocument(Self.closingOpenSpans(source))
+                let document = MarkdownDocument(Self.closingOpenSpans(source), active: active)
                 TimelineView(.animation) { context in
                     blocks(document, head: clock.head(at: context.date, length: document.length))
                 }
             } else {
-                blocks(MarkdownDocument(source), head: nil)
+                blocks(MarkdownDocument(source, active: active), head: nil)
                     .textSelection(.enabled)
             }
         }
-        .tint(Palette.accent)
+        .tint(Palette.accentInk)
     }
 
     static func closingOpenSpans(_ text: String) -> String {
@@ -143,7 +146,7 @@ struct MarkdownText: View {
     }
 
     private func blocks(_ document: MarkdownDocument, head: Double?) -> some View {
-        VStack(alignment: .leading, spacing: 9) {
+        VStack(alignment: .leading, spacing: Space.m) {
             ForEach(Array(document.blocks.enumerated()), id: \.offset) { _, block in
                 view(for: block, head: head.map { $0 - Double(block.offset) })
             }
@@ -160,7 +163,7 @@ struct MarkdownText: View {
         case .item(let marker, _, let level):
             HStack(alignment: .firstTextBaseline, spacing: Space.s) {
                 Text(marker)
-                    .font(marker == "•" ? Typeface.reading : Typeface.mono)
+                    .font(marker == "•" ? Typeface.chat : Typeface.mono)
                     .foregroundStyle(Palette.inkTertiary)
                     .revealed(head)
                     .frame(minWidth: 12, alignment: .trailing)
@@ -171,7 +174,7 @@ struct MarkdownText: View {
             inline(block.text, color: Palette.inkSecondary, head: head)
                 .padding(.leading, Space.m)
                 .overlay(alignment: .leading) {
-                    Capsule().fill(Palette.hairline).frame(width: 3).opacity(head.map { $0 > 0 ? 1 : 0 } ?? 1)
+                    Capsule().fill(Palette.line).frame(width: 3).opacity(head.map { $0 > 0 ? 1 : 0 } ?? 1)
                 }
         case .code:
             ScrollView(.horizontal) {
@@ -186,7 +189,7 @@ struct MarkdownText: View {
                 Palette.hover.opacity(head.map { $0 > 0 ? 1 : 0 } ?? 1),
                 in: .rect(cornerRadius: Radius.row, style: .continuous))
         case .rule:
-            Rectangle().fill(Palette.hairline).frame(height: 1).padding(.vertical, Space.xs)
+            Rectangle().fill(Palette.line).frame(height: 1).padding(.vertical, Space.xs)
                 .opacity(head.map { min(max($0 / RevealMotion.window, 0), 1) } ?? 1)
         }
     }
@@ -195,23 +198,29 @@ struct MarkdownText: View {
         -> some View
     {
         Text(text)
-            .font(heading ? Typeface.heading : Typeface.reading)
+            .font(heading ? Typeface.chatStrong : Typeface.chat)
             .foregroundStyle(color)
             .revealed(head)
-            .lineSpacing(Typeface.readingLineSpacing)
+            .lineSpacing(Typeface.chatLineSpacing)
             .fixedSize(horizontal: false, vertical: true)
     }
 
     /// Inline Markdown with the type tokens applied: DM Sans has no synthesized bold, so strong runs
     /// get the semibold face explicitly.
-    static func styled(_ text: String, strong: Font) -> AttributedString {
+    static func styled(_ text: String, strong: Font, active: Citation? = nil) -> AttributedString {
         let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-        var result = (try? AttributedString(markdown: Citation.link(text), options: options)) ?? AttributedString(text)
+        // Non-breaking spaces inside the link give the chip some air around its label.
+        let linked = Citation.link(text).replacing(/\[([^\]]*)\]\((nab-cite:[^)]*)\)/) {
+            "[\u{00A0}\($0.1.replacing(" ", with: "\u{00A0}"))\u{00A0}](\($0.2))"
+        }
+        var result = (try? AttributedString(markdown: linked, options: options)) ?? AttributedString(text)
         let runs = result.runs.map { ($0.range, $0.link, $0.inlinePresentationIntent) }
         for (range, link, intent) in runs {
             if link?.scheme == Citation.scheme {
-                result[range].swiftUI.font = Typeface.cite
-                result[range].swiftUI.foregroundColor = Palette.accent
+                let on = link.flatMap(Citation.init(url:)).map { isActive($0, active) } ?? false
+                result[range].swiftUI.font = Typeface.chip
+                result[range].swiftUI.foregroundColor = on ? Palette.onAccent : Palette.accentInk
+                result[range].swiftUI.backgroundColor = on ? Palette.accent : Palette.accentWash
             } else if let intent {
                 if intent.contains(.code) {
                     result[range].swiftUI.font = Typeface.mono
@@ -222,6 +231,14 @@ struct MarkdownText: View {
             }
         }
         return result
+    }
+}
+
+extension MarkdownText {
+    /// Whether a citation points at the moment that is open in the drawer. A chat of one video leaves the video out.
+    fileprivate static func isActive(_ citation: Citation, _ active: Citation?) -> Bool {
+        guard let active else { return false }
+        return (citation.video ?? 1) == (active.video ?? 1) && citation.seconds == active.seconds
     }
 }
 

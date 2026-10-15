@@ -22,7 +22,9 @@ public struct YouTubeSource: SourceProvider {
 
     public func link(to capture: Capture, at seconds: TimeInterval) -> URL {
         var parts = URLComponents(string: "https://www.youtube.com/watch")
-        parts?.queryItems = [.init(name: "v", value: capture.sourceID), .init(name: "t", value: "\(Int(seconds))s")]
+        parts?.queryItems = [
+            .init(name: "v", value: capture.sourceID), .init(name: "t", value: "\(seconds.wholeSeconds)s"),
+        ]
         return parts?.url ?? capture.url
     }
 
@@ -55,15 +57,51 @@ public struct YouTubeSource: SourceProvider {
             chapters: YouTubeChapters.parse(description)
         )
 
-        let tracks = player.captions?.playerCaptionsTracklistRenderer?.captionTracks ?? []
-        if let track = Self.preferredTrack(tracks) {
+        if let track = Self.preferredTrack(in: player) {
             capture.transcript = try await transcript(track)
         }
         return capture
     }
 
-    /// The spoken language is the language of the auto-generated track; a human track in that language
-    /// beats it, and any human track beats nothing.
+    /// The track in the video's original audio language: a human track beats the auto-generated one, then
+    /// the track YouTube marks as the original's default, then `preferredTrack(_:)`. Auto-dubbed videos
+    /// list one auto-generated track per dub language, so the first of them is rarely the original.
+    /// An audio track id ending in ".4" is the original (".3" and ".10" are dubs); the default audio track
+    /// follows the viewer's language and can be a dub, so it only counts when no track is marked.
+    static func preferredTrack(in player: Player) -> Player.Track? {
+        let list = player.captions?.playerCaptionsTracklistRenderer
+        let tracks = list?.captionTracks ?? []
+        let audio = list?.audioTracks ?? []
+        let defaultAudio = list?.defaultAudioTrackIndex.flatMap { audio.indices.contains($0) ? audio[$0] : nil }
+        let isOriginal: (Player.Captions.AudioTrack) -> Bool = { $0.audioTrackId?.hasSuffix(".4") == true }
+        let originalAudio = defaultAudio.flatMap { isOriginal($0) ? $0 : nil } ?? audio.first(where: isOriginal)
+        let original =
+            (originalAudio ?? defaultAudio)?.audioTrackId
+            ?? player.streamingData?.adaptiveFormats?.first { $0.audioTrack?.audioIsDefault == true }?.audioTrack?.id
+        if let language = original.flatMap(Self.language(ofAudioTrack:)) {
+            func speaks(_ track: Player.Track) -> Bool {
+                Locale.Language(identifier: track.languageCode).languageCode?.identifier == language
+            }
+            if let match = tracks.first(where: { $0.kind != "asr" && speaks($0) })
+                ?? tracks.first(where: { $0.kind == "asr" && speaks($0) })
+            {
+                return match
+            }
+        }
+        if let index = (originalAudio ?? defaultAudio)?.defaultCaptionTrackIndex, tracks.indices.contains(index) {
+            return tracks[index]
+        }
+        return preferredTrack(tracks)
+    }
+
+    /// The language code of an audio track id such as "en-US.4" ("en"); the suffix is the audio kind.
+    private static func language(ofAudioTrack id: String) -> String? {
+        let tag = id.split(separator: ".").first.map(String.init) ?? id
+        return Locale.Language(identifier: tag).languageCode?.identifier
+    }
+
+    /// Without any original-language hint: the spoken language is the language of the first
+    /// auto-generated track; a human track in that language beats it, and any human track beats nothing.
     static func preferredTrack(_ tracks: [Player.Track]) -> Player.Track? {
         let asr = tracks.first { $0.kind == "asr" }
         let human = tracks.filter { $0.kind != "asr" }
@@ -108,8 +146,10 @@ public struct YouTubeSource: SourceProvider {
 
     /// Both requests usually answer in 0.2–0.4 s, but now and then one stalls for ~10 s (measured
     /// 2026-10-11, in the CLI and the app alike). If no answer has come after `delay`, the same request
-    /// goes out again on a fresh connection and whichever answers first wins.
-    private func hedged(_ request: URLRequest, delay: Duration = .milliseconds(1200)) async throws -> (
+    /// goes out again on a fresh connection and whichever answers first wins. The 450 ms default sits
+    /// above the normal answer time and below the stalls (2026-10-15: timedtext p50 0.24 s, and 4 of 20
+    /// cold requests stalled 1.3–10.3 s; player max 0.37 s), so a healthy request is rarely doubled.
+    private func hedged(_ request: URLRequest, delay: Duration = .milliseconds(450)) async throws -> (
         Data, URLResponse
     ) {
         let session = session
@@ -262,10 +302,29 @@ struct Player: Decodable {
         let name: Name?
     }
     struct Captions: Decodable {
-        struct Tracklist: Decodable { let captionTracks: [Track]? }
+        struct AudioTrack: Decodable {
+            let audioTrackId: String?
+            let defaultCaptionTrackIndex: Int?
+        }
+        struct Tracklist: Decodable {
+            let captionTracks: [Track]?
+            let audioTracks: [AudioTrack]?
+            let defaultAudioTrackIndex: Int?
+        }
         let playerCaptionsTracklistRenderer: Tracklist?
     }
+    struct StreamingData: Decodable {
+        struct Format: Decodable {
+            struct Audio: Decodable {
+                let id: String?
+                let audioIsDefault: Bool?
+            }
+            let audioTrack: Audio?
+        }
+        let adaptiveFormats: [Format]?
+    }
     let playabilityStatus: Status?
+    let streamingData: StreamingData?
     let videoDetails: Details?
     let captions: Captions?
 }
