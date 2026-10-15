@@ -17,32 +17,46 @@
   },
   "groups": [
     {
-      "name": "quote",
+      "name": "right",
       "layers": [
         {
-          "name": "caret",
-          "image-name": "caret.svg",
+          "name": "quoteR",
+          "image-name": "quoteR.svg",
           "glass": true,
           "fill": {
-            "solid": "extended-srgb:0.98675,0.95725,0.90956,1.00000"
+            "solid": "extended-srgb:0.95000,0.97000,1.00000,1.00000"
           }
-        },
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.45
+      },
+      "specular": true,
+      "translucency": {
+        "enabled": true,
+        "value": 0.35
+      }
+    },
+    {
+      "name": "left",
+      "layers": [
         {
-          "name": "quote",
-          "image-name": "quote.svg",
+          "name": "quoteL",
+          "image-name": "quoteL.svg",
           "glass": true,
           "fill": {
             "linear-gradient": [
-              "extended-srgb:0.92673,0.27327,0.08924,1.00000",
-              "extended-srgb:0.98929,0.65799,0.37050,1.00000"
+              "extended-srgb:0.70588,0.87843,0.30588,1.00000",
+              "extended-srgb:0.84706,0.96078,0.60392,1.00000"
             ],
             "orientation": {
               "start": {
-                "x": 0.24999999999999997,
+                "x": 0.25,
                 "y": 0.5625
               },
               "stop": {
-                "x": 0.8928571428571428,
+                "x": 0.89,
                 "y": 0.5625
               }
             }
@@ -57,28 +71,6 @@
       "translucency": {
         "enabled": false,
         "value": 0
-      }
-    },
-    {
-      "name": "text",
-      "layers": [
-        {
-          "name": "rows",
-          "image-name": "rows.svg",
-          "glass": true,
-          "fill": {
-            "solid": "extended-srgb:0.39160,0.49308,0.57833,1.00000"
-          }
-        }
-      ],
-      "shadow": {
-        "kind": "neutral",
-        "opacity": 0.4
-      },
-      "specular": true,
-      "translucency": {
-        "enabled": true,
-        "value": 0.45
       }
     }
   ],
