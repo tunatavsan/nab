@@ -1,5 +1,6 @@
 import AppKit
 import Carbon.HIToolbox
+import NabAI
 import NabCore
 
 @MainActor
@@ -44,6 +45,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Task {
             await center.load()
             #if DEBUG
+                FileHandle.standardError.write(Data("Nab keychain service: \(Keychain.service)\n".utf8))
                 // Debug builds only: `NAB_OPEN='nab://…'` handles that URL as if it had been opened.
                 if let raw = ProcessInfo.processInfo.environment["NAB_OPEN"], let url = URL(string: raw) {
                     application(NSApp, open: [url])

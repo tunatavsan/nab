@@ -4,7 +4,13 @@ import Security
 
 /// API keys live in the login keychain, one item per provider, never in defaults.
 public enum Keychain {
-    private static let service = "dev.tavsan.nab"
+    /// `dev.tavsan.nab`, or `$NAB_KEYCHAIN_SERVICE` when set, so test builds never see or change the real keys.
+    public static let service = service(in: ProcessInfo.processInfo.environment)
+
+    static func service(in environment: [String: String]) -> String {
+        guard let custom = environment["NAB_KEYCHAIN_SERVICE"], !custom.isEmpty else { return "dev.tavsan.nab" }
+        return custom
+    }
 
     public static func key(for kind: ProviderKind) -> String? {
         var query = base(kind)

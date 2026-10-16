@@ -44,4 +44,10 @@ struct SettingsTests {
         #expect(ProviderKind.claudeCLI.defaultCommand.contains(#"--tools """#))
         #expect(ProviderKind.codexCLI.defaultCommand.contains("--sandbox read-only"))
     }
+
+    @Test func testBuildsCanUseTheirOwnKeychainService() {
+        #expect(Keychain.service(in: [:]) == "dev.tavsan.nab")
+        #expect(Keychain.service(in: ["NAB_KEYCHAIN_SERVICE": ""]) == "dev.tavsan.nab")
+        #expect(Keychain.service(in: ["NAB_KEYCHAIN_SERVICE": "dev.tavsan.nab.shot-A"]) == "dev.tavsan.nab.shot-A")
+    }
 }
