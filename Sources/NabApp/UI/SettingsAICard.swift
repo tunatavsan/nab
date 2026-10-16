@@ -3,7 +3,7 @@ import NabAI
 import NabCore
 import SwiftUI
 
-/// Provider, model, key, language and a test, in one card.
+/// The AI section: provider, then model, key, language, a test and the advanced settings.
 struct SettingsAICard: View {
     @Bindable var assistant: Assistant
     @State private var key = ""
@@ -27,21 +27,20 @@ struct SettingsAICard: View {
 
     private var kind: ProviderKind { assistant.settings.kind }
 
+    /// The pop-ups and fields on the right of a row share this width.
+    private static let fieldWidth: CGFloat = 260
+
     var body: some View {
-        SettingsCard {
-            VStack(alignment: .leading, spacing: 16) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("AI").font(Typeface.title).foregroundStyle(Palette.ink).accessibilityAddTraits(.isHeader)
-                    Text("Used for summaries, session chats and the floating window.")
-                        .font(Typeface.meta).foregroundStyle(Palette.inkTertiary)
-                }
-                providerList
-                if kind.usesKey { keyField }
-                if kind == .custom { serverField(title: "Server address") }
-                modelSection
+        SettingsSection(title: "AI", footnote: "Used for summaries, session chats and the floating window.") {
+            providerGroup
+            SettingsGroup {
+                modelRow
+                if modelIDVisible { modelIDRow }
                 languageRow
-                Divider().overlay(Palette.line)
+                if kind.usesKey { keyRow }
+                if kind == .custom { serverRow }
                 testRow
+                advancedHeader
                 if showAdvanced { advanced }
             }
         }
@@ -74,16 +73,16 @@ struct SettingsAICard: View {
 
     // MARK: Providers
 
-    private var providerList: some View {
-        VStack(spacing: 0) {
+    private var moreExpanded: Bool { showMore || ProviderKind.more.contains(kind) }
+
+    private var providerGroup: some View {
+        SettingsGroup {
             ForEach(ProviderKind.common, id: \.self) { row($0) }
             moreRow
-            if showMore || ProviderKind.more.contains(kind) {
+            if moreExpanded {
                 ForEach(ProviderKind.more, id: \.self) { row($0) }
             }
         }
-        .clipShape(.rect(cornerRadius: Radius.thumb, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: Radius.thumb, style: .continuous).strokeBorder(Palette.line))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Provider")
     }
@@ -94,16 +93,13 @@ struct SettingsAICard: View {
         return Button {
             assistant.settings.kind = provider
         } label: {
-            HStack(spacing: 12) {
-                Circle()
-                    .strokeBorder(on ? Palette.accentInk : Palette.lineStrong, lineWidth: 1.5)
-                    .frame(width: 16, height: 16)
-                    .overlay { Circle().fill(on ? Palette.accentInk : .clear).frame(width: 6, height: 6) }
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(provider.shortTitle).font(Typeface.rowTitle).foregroundStyle(Palette.ink)
+            HStack(spacing: Space.m) {
+                radio(on: on)
+                VStack(alignment: .leading, spacing: Space.xxs) {
+                    Text(provider.shortTitle).font(Typeface.body).foregroundStyle(Palette.ink)
                     Text(provider.blurb).font(Typeface.meta).foregroundStyle(Palette.inkTertiary).lineLimit(1)
                 }
-                Spacer(minLength: 8)
+                Spacer(minLength: Space.s)
                 Text(status.label)
                     .font(Typeface.meta)
                     .foregroundStyle(status.isPositive ? Palette.accentInk : Palette.inkTertiary)
@@ -111,37 +107,39 @@ struct SettingsAICard: View {
                     .truncationMode(.middle)
                     .frame(maxWidth: 170, alignment: .trailing)
             }
-            .padding(.horizontal, 14)
-            .frame(height: 46)
-            .overlay(alignment: .bottom) { Rectangle().fill(Palette.line).frame(height: 1) }
+            .settingsRowFrame(tall: true)
         }
-        .buttonStyle(SettingsRowStyle(selected: on, tint: Palette.accentWash))
+        .buttonStyle(SettingsRowStyle())
         .accessibilityLabel("\(provider.shortTitle), \(provider.blurb), \(status.label)")
         .accessibilityAddTraits(on ? [.isSelected] : [])
     }
 
+    private func radio(on: Bool) -> some View {
+        Circle()
+            .strokeBorder(on ? Palette.accentInk : Palette.lineStrong, lineWidth: 1.5)
+            .frame(width: 16, height: 16)
+            .overlay { Circle().fill(on ? Palette.accentInk : .clear).frame(width: 6, height: 6) }
+    }
+
     private var moreRow: some View {
-        let expanded = showMore || ProviderKind.more.contains(kind)
-        return Button {
+        Button {
             withAnimation(Motion.resolved(Motion.settle, reduceMotion: reduceMotion)) { showMore.toggle() }
         } label: {
-            HStack(spacing: 6) {
-                Text("More providers").font(Typeface.button).foregroundStyle(Palette.inkSecondary)
-                if !expanded {
+            HStack(spacing: Space.s) {
+                Text("More providers").font(Typeface.body).foregroundStyle(Palette.inkSecondary)
+                if !moreExpanded {
                     Text("OpenRouter, LM Studio or your own server").font(Typeface.meta)
                         .foregroundStyle(Palette.inkTertiary).lineLimit(1)
                 }
-                Spacer(minLength: 8)
+                Spacer(minLength: Space.s)
                 Image(systemName: "chevron.right").font(Typeface.iconMicro).foregroundStyle(Palette.inkSecondary)
-                    .rotationEffect(.degrees(expanded ? 90 : 0))
+                    .rotationEffect(.degrees(moreExpanded ? 90 : 0))
             }
-            .padding(.leading, 42)
-            .padding(.trailing, 14)
-            .frame(height: 38)
-            .overlay(alignment: .bottom) { if expanded { Rectangle().fill(Palette.line).frame(height: 1) } }
+            .settingsRowFrame()
+            .padding(.leading, 28)
         }
         .buttonStyle(SettingsRowStyle())
-        .accessibilityLabel(expanded ? "Fewer providers" : "More providers")
+        .accessibilityLabel(moreExpanded ? "Fewer providers" : "More providers")
     }
 
     private func status(of provider: ProviderKind) -> ProviderStatus {
@@ -154,9 +152,14 @@ struct SettingsAICard: View {
 
     // MARK: Key and server
 
-    private var keyField: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("API key").font(Typeface.label).foregroundStyle(Palette.inkTertiary)
+    private var keyRow: some View {
+        SettingsRow(title: "API key") {
+            if let keyError {
+                SettingsDetail(text: keyError, isError: true).textSelection(.enabled)
+            } else {
+                SettingsDetail(text: "Stored in your keychain")
+            }
+        } control: {
             SecureField(
                 "API key", text: $key, prompt: Text(kind == .custom ? "Optional" : "Paste your key")
             )
@@ -164,24 +167,24 @@ struct SettingsAICard: View {
             .font(Typeface.body)
             .settingsField(focus: $keyFocused)
             .onSubmit { saveKey() }
+            .frame(width: Self.fieldWidth)
             .accessibilityLabel("\(kind.shortTitle) API key")
-            if let keyError {
-                Text(keyError).font(Typeface.meta).foregroundStyle(Palette.error).textSelection(.enabled)
-            } else {
-                Text("Stored in your keychain").font(Typeface.meta).foregroundStyle(Palette.inkTertiary)
-            }
         }
     }
 
-    private func serverField(title: String) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(Typeface.label).foregroundStyle(Palette.inkTertiary)
-            TextField(title, text: $assistant.settings.baseURL, prompt: Text(kind.defaultBaseURL))
-                .labelsHidden()
-                .font(Typeface.code)
-                .settingsField()
-                .accessibilityLabel(title)
+    private var serverRow: some View {
+        SettingsRow(title: "Server address") {
+            serverField
         }
+    }
+
+    private var serverField: some View {
+        TextField("Server address", text: $assistant.settings.baseURL, prompt: Text(kind.defaultBaseURL))
+            .labelsHidden()
+            .font(Typeface.code)
+            .settingsField()
+            .frame(width: Self.fieldWidth)
+            .accessibilityLabel("Server address")
     }
 
     // MARK: Model
@@ -192,98 +195,80 @@ struct SettingsAICard: View {
         ModelChoices.selection(model: assistant.settings.model, among: choices)
     }
 
-    private var modelSection: some View {
+    private var otherSelected: Bool {
+        if case .other = selection { return true }
+        return typingModel
+    }
+
+    private var modelIDVisible: Bool { otherSelected }
+
+    private var modelRow: some View {
         let list = choices
-        var otherID = ""
-        var otherSelected = typingModel
-        if case .other(let id) = selection {
-            otherID = id
-            otherSelected = true
+        var current = "Other…"
+        if !typingModel {
+            switch selection {
+            case .choice(let id): current = list.first { $0.id == id }?.name ?? "Default"
+            case .other(let id): current = id.isEmpty ? "Other…" : ModelChoices.displayName(for: id)
+            }
         }
-        return VStack(alignment: .leading, spacing: 8) {
-            Text("Model").font(Typeface.label).foregroundStyle(Palette.inkTertiary)
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
+        let others = models.filter { name in !list.contains { $0.id == name } }
+        return SettingsRow(title: "Model") {
+            Menu {
                 ForEach(list) { choice in
-                    modelCard(
-                        name: choice.name, note: choice.note,
-                        on: !otherSelected && selection == .choice(choice.id)
-                    ) {
+                    Button {
                         typingModel = false
                         assistant.settings.model = choice.id
+                    } label: {
+                        let title = "\(choice.name) · \(choice.note)"
+                        if !typingModel && selection == .choice(choice.id) {
+                            Label(title, systemImage: "checkmark")
+                        } else {
+                            Text(title)
+                        }
                     }
                 }
-                otherCard(selected: otherSelected, id: otherID)
-            }
-            if otherSelected {
-                TextField(
-                    "Model ID", text: $assistant.settings.model,
-                    prompt: Text(kind == .ollama || kind == .lmStudio ? "Model name" : "Model ID")
-                )
-                .labelsHidden()
-                .font(Typeface.code)
-                .settingsField()
-                .accessibilityLabel("Model ID")
-            }
-        }
-    }
-
-    private func modelCard(name: String, note: String, on: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) { cardLabel(name: name, note: note, on: on) }
-            .buttonStyle(SettingsRowStyle(selected: on, radius: Radius.thumb))
-            .overlay(cardBorder(on: on))
-            .accessibilityLabel("\(name), \(note)")
-            .accessibilityAddTraits(on ? [.isSelected] : [])
-    }
-
-    private func otherCard(selected: Bool, id: String) -> some View {
-        Menu {
-            ForEach(models, id: \.self) { name in
-                Button(name) {
-                    typingModel = false
-                    assistant.settings.model = name
+                if !others.isEmpty {
+                    Divider()
+                    Menu("More models") {
+                        ForEach(others, id: \.self) { name in
+                            Button(name) {
+                                typingModel = false
+                                assistant.settings.model = name
+                            }
+                        }
+                    }
                 }
+                if list.isEmpty, others.isEmpty { Text("No models listed") }
+                Divider()
+                Button("Other…") { typingModel = true }
+            } label: {
+                Text(current)
             }
-            if models.isEmpty { Text("No models listed") }
-            Divider()
-            Button("Type a model ID…") { typingModel = true }
-        } label: {
-            cardLabel(name: "Other…", note: id.isEmpty ? ModelChoices.otherNote(for: kind) : id, on: selected)
-                .background(selected ? Palette.selected : .clear, in: .rect(cornerRadius: Radius.thumb))
-                .contentShape(.rect(cornerRadius: Radius.thumb))
+            .controlSize(.regular)
+            .fixedSize()
+            .help("Choose from the models this provider offers, or type a model ID")
+            .accessibilityLabel("Model, \(current)")
         }
-        .menuStyle(.button)
-        .buttonStyle(.plain)
-        .menuIndicator(.hidden)
-        .overlay(cardBorder(on: selected))
-        .help("Choose from the models this provider offers, or type a model ID")
-        .accessibilityLabel("Other model")
     }
 
-    private func cardLabel(name: String, note: String, on: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 6) {
-                Text(name).font(Typeface.rowTitle).foregroundStyle(Palette.ink).lineLimit(1).truncationMode(.middle)
-                Circle().fill(on ? Palette.accentInk : .clear).frame(width: 6, height: 6)
-            }
-            Text(note).font(Typeface.meta).foregroundStyle(Palette.inkTertiary).lineLimit(1).truncationMode(.middle)
+    private var modelIDRow: some View {
+        SettingsRow(title: "Model ID") {
+            TextField(
+                "Model ID", text: $assistant.settings.model,
+                prompt: Text(kind == .ollama || kind == .lmStudio ? "Model name" : "Model ID")
+            )
+            .labelsHidden()
+            .font(Typeface.code)
+            .settingsField()
+            .frame(width: Self.fieldWidth)
+            .accessibilityLabel("Model ID")
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func cardBorder(on: Bool) -> some View {
-        RoundedRectangle(cornerRadius: Radius.thumb, style: .continuous)
-            .strokeBorder(on ? Palette.accent : Palette.line, lineWidth: on ? 1.5 : 1)
-            .allowsHitTesting(false)
     }
 
     // MARK: Language, test, advanced
 
     private var languageRow: some View {
-        HStack(spacing: 10) {
-            Text("Answer in").font(Typeface.body).foregroundStyle(Palette.ink)
-            Spacer()
+        SettingsRow(title: "Answer in") {
             Menu {
                 ForEach(languageOptions, id: \.name) { language in
                     Button {
@@ -299,11 +284,9 @@ struct SettingsAICard: View {
                     }
                 }
             } label: {
-                SettingsMenuLabel(title: assistant.settings.language)
+                Text(assistant.settings.language)
             }
-            .menuStyle(.button)
-            .buttonStyle(.plain)
-            .menuIndicator(.hidden)
+            .controlSize(.regular)
             .fixedSize()
             .accessibilityLabel("Answer in \(assistant.settings.language)")
         }
@@ -316,52 +299,54 @@ struct SettingsAICard: View {
     }
 
     private var testRow: some View {
-        HStack(spacing: 12) {
+        SettingsRow(title: "Test", hasDetail: true) {
+            testStatus.font(Typeface.meta).fixedSize(horizontal: false, vertical: true)
+        } control: {
             NabButton("Test", action: runTest).disabled(test == .running)
-            Group {
-                switch test {
-                case .idle:
-                    Text("Not tested yet").foregroundStyle(Palette.inkTertiary)
-                case .running:
-                    HStack(spacing: 6) {
-                        ProgressView().controlSize(.small)
-                        Text("Testing…").foregroundStyle(Palette.inkSecondary)
-                    }
-                case .passed(let detail):
-                    HStack(spacing: 6) {
-                        Image(systemName: "checkmark").font(Typeface.iconSmall)
-                        Text(detail)
-                    }
-                    .foregroundStyle(Palette.ok)
-                case .failed(let detail):
-                    Text(detail).foregroundStyle(Palette.error).lineLimit(4).textSelection(.enabled)
-                }
-            }
-            .font(Typeface.meta)
-            .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 8)
-            Button {
-                withAnimation(Motion.resolved(Motion.settle, reduceMotion: reduceMotion)) { showAdvanced.toggle() }
-            } label: {
-                HStack(spacing: 5) {
-                    Text("Advanced").font(Typeface.meta)
-                    Image(systemName: "chevron.right").font(Typeface.iconMicro)
-                        .rotationEffect(.degrees(showAdvanced ? 90 : 0))
-                }
-                .foregroundStyle(Palette.inkSecondary)
-                .padding(.vertical, 6)
-                .contentShape(.rect)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(showAdvanced ? "Hide advanced settings" : "Show advanced settings")
         }
+    }
+
+    @ViewBuilder private var testStatus: some View {
+        switch test {
+        case .idle:
+            Text("Not tested yet").foregroundStyle(Palette.inkTertiary)
+        case .running:
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text("Testing…").foregroundStyle(Palette.inkSecondary)
+            }
+        case .passed(let detail):
+            HStack(spacing: 6) {
+                Image(systemName: "checkmark").font(Typeface.iconSmall)
+                Text(detail)
+            }
+            .foregroundStyle(Palette.ok)
+        case .failed(let detail):
+            Text(detail).foregroundStyle(Palette.error).lineLimit(4).textSelection(.enabled)
+        }
+    }
+
+    private var advancedHeader: some View {
+        Button {
+            withAnimation(Motion.resolved(Motion.snap, reduceMotion: reduceMotion)) { showAdvanced.toggle() }
+        } label: {
+            HStack(spacing: Space.m) {
+                Text("Advanced").font(Typeface.body).foregroundStyle(Palette.ink)
+                Spacer(minLength: Space.s)
+                Image(systemName: "chevron.right").font(Typeface.iconMicro).foregroundStyle(Palette.inkSecondary)
+                    .rotationEffect(.degrees(showAdvanced ? 90 : 0))
+            }
+            .settingsRowFrame()
+        }
+        .buttonStyle(SettingsRowStyle())
+        .accessibilityLabel(showAdvanced ? "Hide advanced settings" : "Show advanced settings")
     }
 
     @ViewBuilder private var advanced: some View {
         if kind.isCLI {
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
-                    Text("Command").font(Typeface.label).foregroundStyle(Palette.inkTertiary)
+                    Text("Command").font(Typeface.body).foregroundStyle(Palette.ink)
                     Spacer()
                     if assistant.settings.command != kind.defaultCommand {
                         NabButton("Reset", kind: .ghost) { assistant.settings.command = kind.defaultCommand }
@@ -380,11 +365,11 @@ struct SettingsAICard: View {
                 )
                 .font(Typeface.meta).foregroundStyle(Palette.inkTertiary)
             }
+            .settingsRowFrame()
         } else if kind != .custom {
-            serverField(title: "Server address")
+            serverRow
         } else {
-            Text("Any server that speaks the OpenAI chat completions API.")
-                .font(Typeface.meta).foregroundStyle(Palette.inkTertiary)
+            SettingsDetail(text: "Any server that speaks the OpenAI chat completions API.").settingsRowFrame()
         }
     }
 
