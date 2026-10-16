@@ -21,6 +21,9 @@ final class Assistant {
     /// Opens the settings page of the library window; set by the app delegate.
     @ObservationIgnored var openSettings: () -> Void = {}
 
+    /// The app's assistant, for views that are placed without being handed one (the provider chooser).
+    @ObservationIgnored static weak var main: Assistant?
+
     private let center: CaptureCenter
     @ObservationIgnored private var tasks: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private var keyCache: [ProviderKind: String] = [:]
@@ -30,6 +33,7 @@ final class Assistant {
         self.center = center
         settings = AISettings.load()
         center.onRemove = { [weak self] ids in self?.entriesRemoved(ids) }
+        Self.main = self
         Task { [weak self, store = center.store] in
             let saved = await store.allConversations()
             guard let self else { return }
@@ -87,8 +91,15 @@ final class Assistant {
         reindex()
     }
 
+    /// Whether a summary should first ask which AI to use: the user never chose one, or the chosen one cannot answer.
+    var needsProviderChoice: Bool { !AISettings.isSaved || client.problem != nil }
+
+    /// Starts the summary question. A provider that cannot answer is the caller's to handle (see
+    /// `needsProviderChoice`); nothing opens here.
     func summarize(_ entryIDs: [String]) {
-        send(ChatMessage(role: .user, text: settings.resolvedSummaryPrompt, isSummaryRequest: true), to: entryIDs)
+        send(
+            ChatMessage(role: .user, text: settings.resolvedSummaryPrompt, isSummaryRequest: true), to: entryIDs,
+            opensSettings: false)
     }
 
     /// Summarizes unless the chat already has one; for buttons that mean "show me what this is about".
@@ -161,14 +172,14 @@ final class Assistant {
     }
 
     @discardableResult
-    private func send(_ question: ChatMessage, to entryIDs: [String]) -> Bool {
+    private func send(_ question: ChatMessage, to entryIDs: [String], opensSettings: Bool = true) -> Bool {
         let id = Conversation.id(for: entryIDs)
         guard !streaming.contains(id) else { return false }
         let captures = entryIDs.compactMap { center.entry($0)?.capture }
         guard !captures.isEmpty else { return false }
         let client = client
         if client.problem != nil {
-            openSettings()
+            if opensSettings { openSettings() }
             return false
         }
 

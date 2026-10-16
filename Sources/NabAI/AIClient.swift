@@ -250,6 +250,18 @@ public struct AIClient: Sendable {
 
     // MARK: Command line
 
+    /// The environment a CLI provider runs in: the app's, with the install folders on PATH, and the values the
+    /// command refers to. The effort is a value here and never part of the command text.
+    static func commandEnvironment(
+        settings: AISettings, system: String, base: [String: String] = ProcessInfo.processInfo.environment
+    ) -> [String: String] {
+        var environment = CLIPath.environment(base)
+        environment["NAB_SYSTEM"] = system
+        environment["NAB_MODEL"] = settings.model.trimmingCharacters(in: .whitespaces)
+        environment["NAB_EFFORT"] = settings.effort.trimmingCharacters(in: .whitespaces)
+        return environment
+    }
+
     /// Runs the CLI in the user's login shell from an empty folder (so no project instructions are
     /// picked up), writes the prompt to stdin and streams stdout.
     private func runCommand(system: String, user: String, _ out: AsyncThrowingStream<String, Error>.Continuation)
@@ -261,10 +273,7 @@ public struct AIClient: Sendable {
         let folder = FileManager.default.temporaryDirectory.appending(path: "nab-ai", directoryHint: .isDirectory)
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         process.currentDirectoryURL = folder
-        var environment = ProcessInfo.processInfo.environment
-        environment["NAB_SYSTEM"] = system
-        environment["NAB_MODEL"] = settings.model.trimmingCharacters(in: .whitespaces)
-        process.environment = environment
+        process.environment = Self.commandEnvironment(settings: settings, system: system)
 
         let input = Pipe()
         let output = Pipe()

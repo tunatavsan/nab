@@ -17,10 +17,13 @@ final class AskModel {
     var holdsSummary = false
     /// Bumped to move the cursor into the field.
     var focusRequest = 0
+    /// Shows the provider chooser: a summary was asked for and the user never chose an AI.
+    var choosing = false
 
     @ObservationIgnored var cite: (Citation) -> Void = { _ in }
     @ObservationIgnored var openSettings: () -> Void = {}
     @ObservationIgnored var ensureSummary: () -> Void = {}
+    @ObservationIgnored var later: () -> Void = {}
     @ObservationIgnored var setHeight: (CGFloat) -> Void = { _ in }
 
     var ids: [String] { pinned ?? AskScope.ids(for: scope, session: sessionIDs, latest: latestID) }
@@ -66,6 +69,10 @@ final class AskWindowController {
             assistant.openSettings()
         }
         model.ensureSummary = { [weak self] in self?.ensureSummary() }
+        model.later = { [weak self] in
+            self?.model.choosing = false
+            self?.close()
+        }
         model.setHeight = { [weak self] in self?.panel.setHeight($0) }
     }
 
@@ -138,12 +145,20 @@ final class AskWindowController {
         )
     }
 
-    /// Summarizes unless the chat exists. With a provider that is not set up it stays quiet, so the window can show
-    /// the problem instead of throwing the library open.
+    /// Summarizes unless the chat exists. When the user never chose an AI, or the chosen one cannot answer, the
+    /// window shows the provider chooser instead; choosing starts the summary.
     private func ensureSummary() {
         let ids = model.ids
-        guard !ids.isEmpty, !model.holdsSummary, assistant.client.problem == nil else { return }
-        Task { await assistant.summarizeIfNew(ids) }
+        guard !ids.isEmpty, !model.holdsSummary else { return }
+        Task {
+            await assistant.load(ids)
+            guard assistant.conversation(ids)?.messages.isEmpty ?? true else { return }
+            if assistant.needsProviderChoice {
+                model.choosing = true
+            } else {
+                assistant.summarize(ids)
+            }
+        }
     }
 
     private func toggleScope() {
@@ -284,6 +299,7 @@ struct AskView: View {
                 }
                 Spacer(minLength: 0)
                 ModelMenu(assistant: assistant)
+                EffortMenu(assistant: assistant)
             }
             let videos = ids.compactMap { center.entry($0) }
             if !videos.isEmpty {
@@ -341,11 +357,12 @@ struct AskView: View {
                 message: answer, isLast: answer.id == messages.last?.id,
                 streaming: busy && answer.id == messages.last?.id,
                 assistant: assistant, entryIDs: ids, showsActions: false)
-        } else if let problem = assistant.client.problem {
-            VStack(alignment: .leading, spacing: Space.m) {
-                Text(problem).font(Typeface.body).foregroundStyle(Palette.inkSecondary)
-                NabButton("Open AI Settings", kind: .primary, action: model.openSettings)
-            }
+        } else if model.choosing || assistant.client.problem != nil {
+            ProviderChooser(
+                onChosen: {
+                    model.choosing = false
+                    if !model.holdsSummary { model.ensureSummary() }
+                }, onLater: model.later, problem: assistant.client.problem)
         } else if model.holdsSummary && !busy {
             VStack(alignment: .leading, spacing: Space.m) {
                 Text("Ask a question below, or start with a summary.")

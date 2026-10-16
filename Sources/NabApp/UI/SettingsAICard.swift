@@ -33,9 +33,11 @@ struct SettingsAICard: View {
     var body: some View {
         SettingsSection(title: "AI", footnote: "Used for summaries, session chats and the floating window.") {
             providerGroup
+            if kind.isCLI { CLIGuide(kind: kind).padding(.horizontal, Space.l) }
             SettingsGroup {
                 modelRow
                 if modelIDVisible { modelIDRow }
+                if !kind.effortLevels.isEmpty { effortRow }
                 languageRow
                 if kind.usesKey { keyRow }
                 if kind == .custom { serverRow }
@@ -251,6 +253,28 @@ struct SettingsAICard: View {
         }
     }
 
+    private var effortRow: some View {
+        SettingsRow(
+            title: "Effort",
+            detail: assistant.settings.commandIgnoresEffort ? "Your custom command ignores effort." : nil
+        ) {
+            Menu {
+                Picker("Effort", selection: $assistant.settings.effort) {
+                    Text("Default").tag("")
+                    ForEach(kind.effortLevels, id: \.self) { Text(EffortMenu.name($0)).tag($0) }
+                }
+                .pickerStyle(.inline)
+                .labelsHidden()
+            } label: {
+                Text(assistant.settings.effort.isEmpty ? "Default" : EffortMenu.name(assistant.settings.effort))
+            }
+            .controlSize(.regular)
+            .fixedSize()
+            .help("How much the model thinks before it answers")
+            .accessibilityLabel("Effort")
+        }
+    }
+
     private var modelIDRow: some View {
         SettingsRow(title: "Model ID") {
             TextField(
@@ -360,8 +384,8 @@ struct SettingsAICard: View {
                     .accessibilityLabel("Command")
                 Text(
                     kind == .claudeCLI
-                        ? "Runs in your login shell from an empty folder. The prompt arrives on stdin; $NAB_SYSTEM and $NAB_MODEL carry the system prompt and model."
-                        : "Runs in your login shell. The system prompt and question arrive together on stdin; $NAB_MODEL carries the model."
+                        ? "Runs in your login shell from an empty folder. The prompt arrives on stdin; $NAB_SYSTEM, $NAB_MODEL and $NAB_EFFORT carry the system prompt, model and effort."
+                        : "Runs in your login shell. The system prompt and question arrive together on stdin; $NAB_MODEL and $NAB_EFFORT carry the model and effort."
                 )
                 .font(Typeface.meta).foregroundStyle(Palette.inkTertiary)
             }

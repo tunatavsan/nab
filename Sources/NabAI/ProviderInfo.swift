@@ -93,6 +93,7 @@ public enum ProviderProbe {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/zsh")
         process.arguments = ["-lc", "command -v \(name) >/dev/null 2>&1"]
+        process.environment = CLIPath.environment()
         process.standardInput = FileHandle.nullDevice
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice

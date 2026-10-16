@@ -42,16 +42,27 @@ public enum ProviderKind: String, Codable, CaseIterable, Sendable, Identifiable 
         self == .claudeCLI || self == .anthropic ? ClaudeModels.current : []
     }
 
+    /// Reasoning effort levels the provider's CLI accepts, lowest first; empty when the provider has no such setting.
+    /// The API providers stay empty: no official reference was checked for a request parameter (K3), and the local
+    /// servers have none. Levels are not filtered by model; a CLI rejects what a model cannot take and says so.
+    public var effortLevels: [String] {
+        switch self {
+        case .claudeCLI: ["low", "medium", "high", "xhigh", "max"]
+        case .codexCLI: ["low", "medium", "high", "xhigh"]
+        default: []
+        }
+    }
+
     /// Run in the user's login shell so PATH and sign-in match their terminal. The prompt goes in on
-    /// stdin; `$NAB_SYSTEM` and `$NAB_MODEL` carry the system prompt and model. The model flag and its value
+    /// stdin; `$NAB_SYSTEM`, `$NAB_MODEL` and `$NAB_EFFORT` carry the system prompt, model and effort. The model flag and its value
     /// are two expansions: zsh does not split `${NAB_MODEL:+--model "$NAB_MODEL"}` into words, so the CLI
     /// received "--model <id>" as one unknown option and failed whenever a model was chosen.
     public var defaultCommand: String {
         switch self {
         case .claudeCLI:
-            #"claude -p --system-prompt "$NAB_SYSTEM" ${NAB_MODEL:+--model} ${NAB_MODEL:+"$NAB_MODEL"} --tools "" --strict-mcp-config --no-session-persistence --output-format stream-json --include-partial-messages --verbose"#
+            #"claude -p --system-prompt "$NAB_SYSTEM" ${NAB_MODEL:+--model} ${NAB_MODEL:+"$NAB_MODEL"} ${NAB_EFFORT:+--effort} ${NAB_EFFORT:+"$NAB_EFFORT"} --tools "" --strict-mcp-config --no-session-persistence --output-format stream-json --include-partial-messages --verbose"#
         case .codexCLI:
-            #"codex exec --skip-git-repo-check --sandbox read-only ${NAB_MODEL:+-m} ${NAB_MODEL:+"$NAB_MODEL"} -"#
+            #"codex exec --skip-git-repo-check --sandbox read-only ${NAB_MODEL:+-m} ${NAB_MODEL:+"$NAB_MODEL"} ${NAB_EFFORT:+-c} ${NAB_EFFORT:+"model_reasoning_effort=$NAB_EFFORT"} -"#
         default: ""
         }
     }
@@ -71,6 +82,8 @@ public struct AISettings: Codable, Sendable, Equatable {
     public var models: [ProviderKind: String] = [:]
     public var baseURLs: [ProviderKind: String] = [:]
     public var commands: [ProviderKind: String] = [:]
+    /// Reasoning effort per provider; absent means the CLI's own default.
+    public var efforts: [ProviderKind: String] = [:]
     /// How the assistant behaves in every chat.
     public var systemPrompt = AISettings.defaultSystemPrompt
     /// What "Summarize" asks for.
@@ -93,6 +106,16 @@ public struct AISettings: Codable, Sendable, Equatable {
         set { commands[kind] = newValue }
     }
 
+    /// True when the provider is a CLI whose command never reads `$NAB_EFFORT`, so the effort setting has no effect.
+    public var commandIgnoresEffort: Bool {
+        kind.isCLI && !kind.effortLevels.isEmpty && !command.contains("NAB_EFFORT")
+    }
+
+    public var effort: String {
+        get { efforts[kind] ?? "" }
+        set { efforts[kind] = newValue.isEmpty ? nil : newValue }
+    }
+
     public var resolvedSystemPrompt: String {
         systemPrompt.replacingOccurrences(of: "{language}", with: language)
     }
@@ -102,24 +125,39 @@ public struct AISettings: Codable, Sendable, Equatable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case kind, models, baseURLs, commands, systemPrompt, summaryPrompt, language
+        case kind, models, baseURLs, commands, efforts, systemPrompt, summaryPrompt, language
     }
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let fresh = AISettings()
-        kind = try c.decodeIfPresent(ProviderKind.self, forKey: .kind) ?? fresh.kind
-        models = try c.decodeIfPresent([ProviderKind: String].self, forKey: .models) ?? [:]
-        baseURLs = try c.decodeIfPresent([ProviderKind: String].self, forKey: .baseURLs) ?? [:]
-        commands = (try c.decodeIfPresent([ProviderKind: String].self, forKey: .commands) ?? [:])
-            .filter { !Self.previousCommands.contains($0.value) }
+        // Each field stands alone: one value this build cannot read (a provider from a newer version, a wrong type)
+        // costs that value, not the user's models, commands and prompts.
+        kind = (try? c.decodeIfPresent(ProviderKind.self, forKey: .kind)) ?? fresh.kind
+        models = Self.lenientMap(c, .models)
+        baseURLs = Self.lenientMap(c, .baseURLs)
+        commands = Self.lenientMap(c, .commands).filter { !Self.previousCommands.contains($0.value) }
+        efforts = Self.lenientMap(c, .efforts)
         systemPrompt =
-            try c.decodeIfPresent(String.self, forKey: .systemPrompt)
+            ((try? c.decodeIfPresent(String.self, forKey: .systemPrompt)) ?? nil)
             .flatMap { Self.previousSystemPrompts.contains($0) ? nil : $0 } ?? fresh.systemPrompt
         summaryPrompt =
-            try c.decodeIfPresent(String.self, forKey: .summaryPrompt)
+            ((try? c.decodeIfPresent(String.self, forKey: .summaryPrompt)) ?? nil)
             .flatMap { Self.previousSummaryPrompts.contains($0) ? nil : $0 } ?? fresh.summaryPrompt
-        language = try c.decodeIfPresent(String.self, forKey: .language) ?? fresh.language
+        language = ((try? c.decodeIfPresent(String.self, forKey: .language)) ?? nil) ?? fresh.language
+    }
+
+    /// A provider-keyed map read entry by entry: a key this build does not know is dropped alone. Swift stores such
+    /// a map as a flat array `[key, value, key, value, …]`.
+    private static func lenientMap(
+        _ c: KeyedDecodingContainer<CodingKeys>, _ key: CodingKeys
+    ) -> [ProviderKind: String] {
+        guard let flat = (try? c.decodeIfPresent([String].self, forKey: key)) ?? nil else { return [:] }
+        var map: [ProviderKind: String] = [:]
+        for index in stride(from: 0, to: flat.count - 1, by: 2) {
+            if let kind = ProviderKind(rawValue: flat[index]) { map[kind] = flat[index + 1] }
+        }
+        return map
     }
 
     /// Stores only what differs from the built-in defaults, so improved defaults reach everyone who
@@ -130,6 +168,7 @@ public struct AISettings: Codable, Sendable, Equatable {
         try c.encode(models.filter { !$0.value.isEmpty && $0.value != $0.key.defaultModel }, forKey: .models)
         try c.encode(baseURLs.filter { $0.value != $0.key.defaultBaseURL }, forKey: .baseURLs)
         try c.encode(commands.filter { $0.value != $0.key.defaultCommand }, forKey: .commands)
+        try c.encode(efforts.filter { !$0.value.isEmpty }, forKey: .efforts)
         if systemPrompt != Self.defaultSystemPrompt { try c.encode(systemPrompt, forKey: .systemPrompt) }
         if summaryPrompt != Self.defaultSummaryPrompt { try c.encode(summaryPrompt, forKey: .summaryPrompt) }
         try c.encode(language, forKey: .language)
@@ -166,6 +205,8 @@ public struct AISettings: Codable, Sendable, Equatable {
         """
     ]
     static let previousCommands: Set<String> = [
+        #"claude -p --system-prompt "$NAB_SYSTEM" ${NAB_MODEL:+--model} ${NAB_MODEL:+"$NAB_MODEL"} --tools "" --strict-mcp-config --no-session-persistence --output-format stream-json --include-partial-messages --verbose"#,
+        #"codex exec --skip-git-repo-check --sandbox read-only ${NAB_MODEL:+-m} ${NAB_MODEL:+"$NAB_MODEL"} -"#,
         #"claude -p --system-prompt "$NAB_SYSTEM" ${NAB_MODEL:+--model "$NAB_MODEL"} --tools "" --strict-mcp-config --no-session-persistence"#,
         #"codex exec --skip-git-repo-check ${NAB_MODEL:+-m "$NAB_MODEL"} -"#,
         #"claude -p --system-prompt "$NAB_SYSTEM" ${NAB_MODEL:+--model "$NAB_MODEL"} --tools "" --strict-mcp-config --no-session-persistence --output-format stream-json --include-partial-messages --verbose"#,
@@ -190,6 +231,9 @@ public struct AISettings: Codable, Sendable, Equatable {
     }
 
     private static let defaultsKey = "ai.settings"
+
+    /// Whether the user ever saved a provider choice; false on a fresh install.
+    public static var isSaved: Bool { UserDefaults.standard.data(forKey: defaultsKey) != nil }
 
     public static func load() -> AISettings {
         guard let data = UserDefaults.standard.data(forKey: defaultsKey) else { return AISettings() }

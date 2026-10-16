@@ -12,6 +12,7 @@ struct ChatView: View {
     /// The passage open in the transcript drawer, so its chip in the answer is filled.
     var activeCitation: Citation?
     @State private var draft = ""
+    @State private var choosing = false
     @State private var selection: TextSelection?
     @FocusState private var composing: Bool
 
@@ -131,19 +132,21 @@ struct ChatView: View {
                 .foregroundStyle(Palette.inkTertiary)
                 .multilineTextAlignment(.center)
             }
-            if let problem {
-                VStack(spacing: Space.m) {
-                    Text(problem)
-                        .font(Typeface.body)
-                        .foregroundStyle(Palette.inkSecondary)
-                        .multilineTextAlignment(.center)
-                    NabButton("Open AI Settings", kind: .primary, size: .large, action: assistant.openSettings)
-                }
+            if problem != nil || choosing {
+                ProviderChooser(
+                    onChosen: {
+                        choosing = false
+                        Task { await assistant.summarizeIfNew(entryIDs) }
+                    }, problem: problem
+                )
                 .padding(.top, Space.s)
             } else {
-                NabButton("Summarize", kind: .primary, size: .large) { assistant.summarize(entryIDs) }
-                    .disabled(!ready)
-                    .padding(.top, Space.xs)
+                NabButton("Summarize", kind: .primary, size: .large) {
+                    // A first summary asks which AI to use; `summarizeIfNew` loads the saved chat first.
+                    if AISettings.isSaved { Task { await assistant.summarizeIfNew(entryIDs) } } else { choosing = true }
+                }
+                .disabled(!ready)
+                .padding(.top, Space.xs)
                 VStack(spacing: Space.xxs) {
                     ForEach(suggestions, id: \.self) { question in
                         SuggestionRow(text: question, enabled: ready) { assistant.ask(question, about: entryIDs) }
@@ -196,6 +199,8 @@ struct ChatView: View {
             ScopeMenu(ids: entryIDs, model: model)
                 .padding(.bottom, 4)
             ModelMenu(assistant: assistant)
+                .padding(.bottom, 4)
+            EffortMenu(assistant: assistant)
                 .padding(.bottom, 4)
             SendButton(stop: busy, enabled: busy || canSend) {
                 busy ? assistant.stop(entryIDs) : send()

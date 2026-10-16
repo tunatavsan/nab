@@ -156,7 +156,7 @@ struct OnboardingView: View {
     }
 }
 
-/// The middle two steps. Placeholders for now: the shortcut keys as plain text and a button to the AI settings.
+/// The middle two steps: the four shortcuts as key caps, and the provider chooser that the first summary also shows.
 private struct OnboardingSetupStep: View {
     enum Kind { case shortcuts, ai }
     let kind: Kind
@@ -183,9 +183,8 @@ private struct OnboardingSetupStep: View {
                 .frame(width: Space.drawerWidth)
                 NabButton("Change…") { model.go(.settings) }
             case .ai:
-                Text("Pick the AI that answers about your videos.").font(Typeface.reading)
-                    .foregroundStyle(Palette.inkSecondary)
-                NabButton("Choose in Settings") { model.go(.settings) }
+                ProviderChooser { model.welcomeStep = 3 }
+                    .frame(width: Space.readingWidth)
             }
         }
     }

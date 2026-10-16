@@ -40,6 +40,20 @@ struct SettingsTests {
         #expect(settings.language == "German")
     }
 
+    @Test func oneUnreadableValueDoesNotResetTheRest() throws {
+        let stored: [String: Any] = [
+            "kind": "someProviderFromTheFuture", "language": "German", "summaryPrompt": "Three bullets only.",
+            "models": ["lmStudio", "m1", "someProviderFromTheFuture", "m2"],
+            "commands": ["claudeCLI", 7], "baseURLs": ["ollama", "http://h:1/v1"],
+        ]
+        let settings = try JSONDecoder().decode(AISettings.self, from: JSONSerialization.data(withJSONObject: stored))
+        #expect(settings.kind == .claudeCLI)
+        #expect(settings.models == [.lmStudio: "m1"])
+        #expect(settings.commands.isEmpty)
+        #expect(settings.baseURLs == [.ollama: "http://h:1/v1"])
+        #expect(settings.language == "German" && settings.summaryPrompt == "Three bullets only.")
+    }
+
     @Test func commandLineProvidersRunWithoutTools() {
         #expect(ProviderKind.claudeCLI.defaultCommand.contains(#"--tools """#))
         #expect(ProviderKind.codexCLI.defaultCommand.contains("--sandbox read-only"))
