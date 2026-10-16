@@ -15,7 +15,7 @@
 	<key>LSUIElement</key><true/>
 	<key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
 	<key>NSHighResolutionCapable</key><true/>
-	<key>NSAppleEventsUsageDescription</key><string>Nab reads the address of the tab in front of you when you press its shortcut. It never reads page contents.</string>
+	<key>NSAppleEventsUsageDescription</key><string>Nab reads the addresses of your browser tabs: the front tab when you press its shortcut, and all tabs to find a YouTube video you clicked a timecode for. In the matching YouTube tab it only changes the playback position. It never reads page contents.</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>

@@ -1,4 +1,5 @@
 import AppKit
+import NabCore
 
 struct FrontTab: Sendable {
     let url: URL
@@ -8,9 +9,9 @@ struct FrontTab: Sendable {
 /// Reads the active tab of a browser over Apple Events. Chromium browsers share Chrome's scripting
 /// dictionary; Safari has its own. Firefox-based browsers expose none, so they are not listed.
 enum BrowserBridge {
-    private enum Family { case chromium, safari }
+    typealias Family = BrowserFamily
 
-    private static let browsers: [(id: String, family: Family)] = [
+    static let browsers: [(id: String, family: Family)] = [
         ("net.imput.helium", .chromium),
         ("com.google.Chrome", .chromium),
         ("com.google.Chrome.canary", .chromium),
@@ -28,7 +29,7 @@ enum BrowserBridge {
 
     /// One serial queue: NSAppleScript is not safe to run concurrently, and keeping it off the main
     /// thread keeps the capture toast animating while the browser answers.
-    private static let queue = DispatchQueue(label: "dev.tavsan.nab.applescript", qos: .userInitiated)
+    static let queue = DispatchQueue(label: "dev.tavsan.nab.applescript", qos: .userInitiated)
 
     /// The active tab of the browser in front; if the front app is not a browser, the first running
     /// browser whose active tab `accept`s.

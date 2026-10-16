@@ -95,6 +95,9 @@ final class LibraryWindowController: NSObject, NSWindowDelegate {
     private func bringForward() {
         NSApp.setActivationPolicy(.regular)
         window.makeKeyAndOrderFront(nil)
+        // Nab may be refused activation while a browser is in front (macOS cooperative activation); the window still
+        // has to come forward.
+        window.orderFrontRegardless()
         NSApp.activate()
     }
 
@@ -183,22 +186,20 @@ final class LibraryModel {
 
     func jump(to entryID: String, at seconds: TimeInterval) { focus = Focus(entryID: entryID, seconds: seconds) }
 
-    /// Follows a timecode link from a chat. On a session or video page the transcript opens at that moment; with
-    /// ⌘ held, or anywhere else, the video opens in the browser at that second.
+    /// Follows a timecode link from a chat: the video plays through the router. With ⌘ held the transcript opens
+    /// at that moment instead, on the video's page.
     func open(_ citation: Citation) {
         let ids = assistant.conversation(currentIDs)?.entryIDs ?? currentIDs
         let videos = ids.compactMap { center.entry($0) }.filter { $0.capture != nil }
         let index = (citation.video ?? 1) - 1
-        guard videos.indices.contains(index), let capture = videos[index].capture else { return }
-        let inPage: Bool
-        switch route {
-        case .session, .video: inPage = !NSEvent.modifierFlags.contains(.command)
-        case .home, .settings, .welcome: inPage = false
-        }
-        if inPage {
-            jump(to: videos[index].id, at: citation.seconds)
+        guard videos.indices.contains(index) else { return }
+        if NSEvent.modifierFlags.contains(.command) {
+            switch route {
+            case .session, .video: jump(to: videos[index].id, at: citation.seconds)
+            case .home, .settings, .welcome: open(videos[index], at: citation.seconds)
+            }
         } else {
-            NSWorkspace.shared.open(capture.url(at: citation.seconds))
+            PlaybackRouter.shared.play(entryID: videos[index].id, at: citation.seconds)
         }
     }
 
@@ -479,7 +480,7 @@ struct EntryContextMenu: ViewModifier {
     func body(content: Content) -> some View {
         content.contextMenu {
             Button(entry.phase == .failed ? "Try Again" : "Fetch Again") { model.center.retry(entry.id) }
-            Button("Open in Browser") { NSWorkspace.shared.open(entry.url) }
+            Button("Open in Browser") { PlaybackRouter.shared.openInBrowser(entryID: entry.id) }
             Button("Copy Link") { Pasteboard.copy(entry.url.absoluteString) }
             Divider()
             Button("Remove from Library", role: .destructive) { model.remove(entry) }

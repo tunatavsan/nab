@@ -164,7 +164,9 @@ private struct VideoContent: View {
                             Pasteboard.copy(ContextPack.render([capture]))
                             flash($copiedContext)
                         }
-                        NabButton("Open on YouTube", fullWidth: true) { NSWorkspace.shared.open(entry.url) }
+                        NabButton("Open on YouTube", fullWidth: true) {
+                            PlaybackRouter.shared.openInBrowser(entryID: entry.id)
+                        }
                     }
                     GridRow {
                         NabButton("Export…", fullWidth: true, action: model.export)
@@ -204,8 +206,8 @@ private struct VideoContent: View {
                 ChapterRow(
                     chapter: chapter, hits: search.count(inChapter: index), current: index == active
                 ) {
-                    if NSEvent.modifierFlags.contains(.command), let capture {
-                        NSWorkspace.shared.open(capture.url(at: chapter.start))
+                    if !NSEvent.modifierFlags.contains(.command) {
+                        PlaybackRouter.shared.play(entryID: entry.id, at: chapter.start)
                     } else if let target = paragraphs.last(where: { $0.start <= chapter.start + 0.5 })?.start {
                         position = chapter.start
                         scroll = ScrollRequest(target: target)
@@ -458,7 +460,7 @@ private struct VideoContent: View {
                                 .padding(.top, Space.m)
                             }
                             ParagraphRow(
-                                paragraph: paragraph, url: capture?.url(at: paragraph.start),
+                                paragraph: paragraph, entryID: capture == nil ? nil : entry.id,
                                 matches: search.matches(inParagraph: index), current: current,
                                 lit: highlighted == paragraph.start)
                         }
@@ -508,7 +510,7 @@ private struct VideoContent: View {
 /// A timecode and its passage. Find hits are washed and the current one filled; a cited passage is lit.
 private struct ParagraphRow: View {
     let paragraph: Paragraph
-    let url: URL?
+    let entryID: String?
     let matches: [(index: Int, match: TranscriptMatch)]
     let current: Int?
     let lit: Bool
@@ -519,7 +521,7 @@ private struct ParagraphRow: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
             Button {
-                if let url { NSWorkspace.shared.open(url) }
+                if let entryID { PlaybackRouter.shared.play(entryID: entryID, at: paragraph.start) }
             } label: {
                 Text(Timecode.string(paragraph.start))
                     .font(Typeface.chip)
@@ -529,7 +531,7 @@ private struct ParagraphRow: View {
             }
             .buttonStyle(.plain)
             .onHover { over in withAnimation(Motion.snap) { hovering = over } }
-            .help("Open at \(Timecode.string(paragraph.start))")
+            .help("Play from \(Timecode.string(paragraph.start))")
             Text(TranscriptText.marked(paragraph.text, matches: matches, current: current))
                 .font(Typeface.reading)
                 .lineSpacing(Typeface.readingLineSpacing)
@@ -584,7 +586,7 @@ private struct ChapterRow: View {
         }
         .buttonStyle(.plain)
         .onHover { over in withAnimation(Motion.snap) { hovering = over } }
-        .help("Show in the transcript (⌘-click opens the video there)")
+        .help("Play from here (⌘-click shows it in the transcript)")
         .accessibilityLabel("\(chapter.title), \(Timecode.string(chapter.start))")
     }
 }
@@ -650,7 +652,7 @@ private struct VideoCover: View {
 
     var body: some View {
         Button {
-            NSWorkspace.shared.open(entry.url)
+            PlaybackRouter.shared.openInBrowser(entryID: entry.id)
         } label: {
             Palette.well
                 .aspectRatio(16 / 9, contentMode: .fit)
@@ -688,7 +690,7 @@ private struct VideoCover: View {
         }
         .buttonStyle(PressableStyle(scale: 0.99))
         .onHover { over in withAnimation(Motion.snap) { hovering = over } }
-        .help("Open the video")
+        .help("Open on YouTube")
         .accessibilityLabel("Open the video")
         .task(id: entry.id) {
             guard CoverCache.cached(entry) == nil else { return }

@@ -239,10 +239,10 @@ struct ChatView: View {
         }
     }
 
-    /// Links in an answer that is still being written arrive here. Once an answer is selectable, macOS sends its
-    /// links to the system instead, which hands `nab-cite:` links back to the app delegate.
+    /// Links in an answer arrive here, written or selectable: timecodes stay in the app, other links go through
+    /// `AnswerLinks`.
     private func cite(_ url: URL) -> OpenURLAction.Result {
-        guard let citation = Citation(url: url) else { return .systemAction }
+        guard let citation = Citation(url: url) else { return AnswerLinks.handle(url) }
         model.open(citation)
         return .handled
     }

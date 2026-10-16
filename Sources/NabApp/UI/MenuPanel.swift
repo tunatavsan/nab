@@ -535,7 +535,7 @@ private struct TrayRow: View {
         .accessibilityHint("Opens it in the library")
         .contextMenu {
             if entry.phase == .failed { Button("Try Again") { center.retry(entry.id) } }
-            Button("Open Video") { NSWorkspace.shared.open(entry.url) }
+            Button("Open Video") { PlaybackRouter.shared.openInBrowser(entryID: entry.id) }
             Button("Copy Link") { Pasteboard.copy(entry.url.absoluteString) }
             if let capture = entry.capture {
                 Button("Summarize") { actions.summarize([entry.id]) }

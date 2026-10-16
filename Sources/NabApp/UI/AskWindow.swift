@@ -121,18 +121,18 @@ final class AskWindowController {
         monitors = []
     }
 
-    /// Follows a timecode from an answer to the library's video page, or to the browser with ⌘ held.
+    /// Follows a timecode from an answer: it plays through the router, or with ⌘ held opens the transcript in the
+    /// library. The window stays where it is either way.
     func open(_ citation: Citation) {
         let ids = model.ids
         let order = assistant.conversation(ids)?.entryIDs ?? ids
         let videos = order.compactMap { center.entry($0) }.filter { $0.capture != nil }
         let index = (citation.video ?? 1) - 1
-        guard videos.indices.contains(index), let capture = videos[index].capture else { return }
-        close()
+        guard videos.indices.contains(index) else { return }
         if NSEvent.modifierFlags.contains(.command) {
-            NSWorkspace.shared.open(capture.url(at: citation.seconds))
-        } else {
             openVideo(videos[index].id, citation.seconds)
+        } else {
+            PlaybackRouter.shared.play(entryID: videos[index].id, at: citation.seconds)
         }
     }
 
@@ -190,7 +190,7 @@ final class AskWindowController {
             } as Any)
         monitors.append(
             NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
-                guard let self, event.window !== self.panel else { return event }
+                guard let self, event.window !== self.panel, !MiniPlayer.shared.owns(event.window) else { return event }
                 self.close()
                 return event
             } as Any)
@@ -275,7 +275,7 @@ struct AskView: View {
     }
 
     private func cite(_ url: URL) -> OpenURLAction.Result {
-        guard let citation = Citation(url: url) else { return .systemAction }
+        guard let citation = Citation(url: url) else { return AnswerLinks.handle(url) }
         model.cite(citation)
         return .handled
     }

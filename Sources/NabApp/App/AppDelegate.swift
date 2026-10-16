@@ -39,6 +39,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self?.libraryWindow().showWelcome()
                 }))
         assistant.openSettings = { [weak self] in self?.showSettings() }
+        PlaybackRouter.shared.title = { [weak self] id in self?.center.entry(id)?.title }
         rack = RackController(
             center: center, anchor: { [weak self] in self?.status.anchorRect },
             openLibrary: { [weak self] id in self?.showLibrary(select: id) },
@@ -83,7 +84,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// `nab://settings` opens the settings page; `nab://search?q=<text>` opens the ⌘K palette with that text.
     /// Other tools (Shortcuts, Raycast, scripts, agents) can drive Nab through these.
     func application(_ application: NSApplication, open urls: [URL]) {
-        // Timecode links from a selectable answer come back through the system (see `ChatView.cite`).
+        // Timecode links that arrive from outside (another app or page).
         for citation in urls.compactMap(Citation.init(url:)) {
             if askWindow.isVisible { askWindow.open(citation) } else { libraryWindow().open(citation) }
         }

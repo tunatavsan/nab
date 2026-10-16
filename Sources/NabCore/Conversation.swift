@@ -41,10 +41,14 @@ public struct Citation: Hashable, Sendable {
     /// The longest moment a link may name; nothing nabbed is longer, and anything above is a forged link.
     public static let maxSeconds: TimeInterval = 86_400
 
+    /// The highest video position a link may name; a chat holds a handful of videos, and anything above is forged.
+    public static let maxVideo = 999
+
     public init?(url: URL) {
         let parts = url.pathComponents.filter { $0 != "/" }
-        guard url.scheme == Self.scheme, parts.count == 2, let video = Int(parts[0]), let seconds = Double(parts[1]),
-            seconds.isFinite, (0...Self.maxSeconds).contains(seconds)
+        guard url.scheme == Self.scheme, parts.count == 2, let video = Int(parts[0]),
+            (0...Self.maxVideo).contains(video),
+            let seconds = Double(parts[1]), seconds.isFinite, (0...Self.maxSeconds).contains(seconds)
         else { return nil }
         self.video = video == 0 ? nil : video
         self.seconds = seconds

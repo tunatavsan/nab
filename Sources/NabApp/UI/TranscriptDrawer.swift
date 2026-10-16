@@ -136,7 +136,7 @@ struct TranscriptDrawer: View {
                 LazyVStack(alignment: .leading, spacing: 2) {
                     ForEach(Array(paragraphs.enumerated()), id: \.element.id) { index, paragraph in
                         PassageRow(
-                            paragraph: paragraph, url: capture?.url(at: paragraph.start),
+                            paragraph: paragraph, entryID: capture == nil ? nil : entry.id,
                             matches: search.matches(inParagraph: index), lit: index == lit
                         )
                         .id(paragraph.start)
@@ -203,7 +203,7 @@ private struct DrawerLinkLabel: View {
 /// One passage: its timecode (opens the video there) and text, washed when it is the cited moment.
 private struct PassageRow: View {
     let paragraph: Paragraph
-    let url: URL?
+    let entryID: String?
     let matches: [(index: Int, match: TranscriptMatch)]
     let lit: Bool
     @State private var hovering = false
@@ -211,7 +211,7 @@ private struct PassageRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             Button {
-                if let url { NSWorkspace.shared.open(url) }
+                if let entryID { PlaybackRouter.shared.play(entryID: entryID, at: paragraph.start) }
             } label: {
                 Text(Timecode.string(paragraph.start))
                     .font(lit ? Typeface.chip : Typeface.mono)
@@ -222,7 +222,7 @@ private struct PassageRow: View {
             }
             .buttonStyle(.plain)
             .onHover { over in withAnimation(Motion.snap) { hovering = over } }
-            .help("Open at \(Timecode.string(paragraph.start))")
+            .help("Play from \(Timecode.string(paragraph.start))")
             Text(TranscriptText.marked(paragraph.text, matches: matches, current: nil))
                 .font(Typeface.body)
                 .lineSpacing(4)
