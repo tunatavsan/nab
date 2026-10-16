@@ -90,6 +90,15 @@ public struct Conversation: Codable, Sendable, Hashable, Identifiable {
         entryIDs.count == 1 ? entryIDs[0] : "pack:" + entryIDs.sorted().joined(separator: "+")
     }
 
+    /// The ids of the chats left with no video once the `removed` entries are gone. A chat about several videos
+    /// stays while any of them is still in the library (`remaining`), so deleting one video never deletes it.
+    public static func ids(
+        about removed: Set<String>, keeping remaining: Set<String>, in conversations: some Sequence<Conversation>
+    ) -> [String] {
+        conversations.filter { !removed.isDisjoint(with: $0.entryIDs) && remaining.isDisjoint(with: $0.entryIDs) }
+            .map(\.id)
+    }
+
     /// Turns that can be sent back to a model: failed answers and the question that caused them are dropped.
     public var sendable: [ChatMessage] {
         var result: [ChatMessage] = []
@@ -126,6 +135,7 @@ extension LibraryStore {
             return try decoder.decode(Conversation.self, from: data)
         } catch {
             NSLog("Nab: could not read chat \(file.lastPathComponent): \(error)")
+            Self.setAside(file)
             return nil
         }
     }

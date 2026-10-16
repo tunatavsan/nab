@@ -18,12 +18,15 @@ public struct TranscriptMatch: Hashable, Sendable {
 public struct TranscriptSearch: Sendable {
     public let query: String
     public let matches: [TranscriptMatch]
+    /// How many paragraphs were searched; hits are only meaningful against a list of this length.
+    public let paragraphCount: Int
     private let byParagraph: [Int: [Int]]
     private let perChapter: [Int: Int]
 
     public init(paragraphs: [Paragraph], chapters: [Chapter] = [], query: String) {
         let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
         self.query = needle
+        paragraphCount = paragraphs.count
         var found: [TranscriptMatch] = []
         if !needle.isEmpty {
             for (index, paragraph) in paragraphs.enumerated() {
@@ -51,6 +54,21 @@ public struct TranscriptSearch: Sendable {
         }
         byParagraph = grouped
         perChapter = counts
+    }
+
+    /// The hit at `index` if it still points inside a paragraph list of `paragraphCount`; nil for a stale index.
+    public func match(at index: Int, paragraphCount count: Int) -> TranscriptMatch? {
+        guard matches.indices.contains(index), count == paragraphCount,
+            matches[index].paragraph < count
+        else { return nil }
+        return matches[index]
+    }
+
+    /// Runs the search for `query` over `paragraphs` off the calling task's actor.
+    public static func run(paragraphs: [Paragraph], chapters: [Chapter], query: String) async -> TranscriptSearch {
+        await Task.detached(priority: .userInitiated) {
+            TranscriptSearch(paragraphs: paragraphs, chapters: chapters, query: query)
+        }.value
     }
 
     public var isActive: Bool { !query.isEmpty }

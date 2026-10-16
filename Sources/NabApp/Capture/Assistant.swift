@@ -29,6 +29,7 @@ final class Assistant {
     init(center: CaptureCenter) {
         self.center = center
         settings = AISettings.load()
+        center.onRemove = { [weak self] ids in self?.entriesRemoved(ids) }
         Task { [weak self, store = center.store] in
             let saved = await store.allConversations()
             guard let self else { return }
@@ -115,6 +116,29 @@ final class Assistant {
         byID[id] = conversation
         reindex()
         send(ChatMessage(role: .user, text: question.text, isSummaryRequest: question.isSummaryRequest), to: entryIDs)
+    }
+
+    /// Videos left the library: chats left with no video stop streaming and are dropped, in memory and on disk, so
+    /// a finishing answer cannot write them back. A chat that still has a video in the library is kept.
+    private func entriesRemoved(_ removed: Set<String>) {
+        let remaining = Set(center.entries.map(\.id))
+        let gone = Conversation.ids(about: removed, keeping: remaining, in: byID.values)
+        guard !gone.isEmpty else { return }
+        for id in gone {
+            tasks[id]?.cancel()
+            tasks[id] = nil
+            streaming.remove(id)
+            byID[id] = nil
+        }
+        reindex()
+        let store = center.store
+        Task { [center] in
+            do {
+                for id in gone { try await store.deleteConversation(id) }
+            } catch {
+                center.report(error, while: "removing chats of removed videos")
+            }
+        }
     }
 
     func stop(_ entryIDs: [String]) {

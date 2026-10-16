@@ -59,7 +59,15 @@ private struct VideoContent: View {
             try? await Task.sleep(for: .milliseconds(120))
             finding = false
         }
-        .onChange(of: capture?.transcript?.segments.count) { rebuildSearch() }
+        // Searching runs off the main thread after a short pause; the key also covers the paragraph list itself, so a
+        // search never outlives the paragraphs its hits point into.
+        .task(
+            id: SearchKey(
+                query: query, paragraphs: paragraphs.count, chapters: chapters.count,
+                segments: capture?.transcript?.segments.count)
+        ) {
+            await refreshSearch()
+        }
         // `initial` because a page opened by a transcript hit or a citation is created with the focus already set.
         .onChange(of: model.focus, initial: true) { _, focus in
             guard let focus, focus.entryID == entry.id,
@@ -288,11 +296,6 @@ private struct VideoContent: View {
                 .strokeBorder(finding ? Palette.accent : Palette.line, lineWidth: finding ? 1.5 : 1)
         )
         .animation(Motion.snap, value: finding)
-        .onChange(of: query) {
-            rebuildSearch()
-            current = search.index(after: nil)
-            if let current { reveal(current) } else { position = nil }
-        }
     }
 
     private var counter: String {
@@ -300,9 +303,29 @@ private struct VideoContent: View {
         return "\(current + 1) of \(search.matches.count)"
     }
 
-    private func rebuildSearch() {
-        search = TranscriptSearch(paragraphs: paragraphs, chapters: chapters, query: query)
-        if let current, current >= search.matches.count { self.current = nil }
+    private struct SearchKey: Equatable {
+        let query: String
+        let paragraphs: Int
+        let chapters: Int
+        let segments: Int?
+    }
+
+    private func refreshSearch() async {
+        let query = query
+        let paragraphs = paragraphs
+        let chapters = chapters
+        let typed = search.query != query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if typed, !query.isEmpty { try? await Task.sleep(for: .milliseconds(80)) }
+        guard !Task.isCancelled else { return }
+        let found = await TranscriptSearch.run(paragraphs: paragraphs, chapters: chapters, query: query)
+        guard !Task.isCancelled else { return }
+        search = found
+        if typed {
+            current = found.index(after: nil)
+            if let current { reveal(current) } else { position = nil }
+        } else if let current, current >= found.matches.count {
+            self.current = nil
+        }
     }
 
     private func step(forward: Bool) {
@@ -312,7 +335,7 @@ private struct VideoContent: View {
     }
 
     private func reveal(_ index: Int) {
-        let match = search.matches[index]
+        guard let match = search.match(at: index, paragraphCount: paragraphs.count) else { return }
         position = match.time
         scroll = ScrollRequest(target: paragraphs[match.paragraph].start)
     }
@@ -344,12 +367,22 @@ private struct VideoContent: View {
                         }
                     }
                     .offset(y: 8)
-                    ForEach(Array(search.matches.enumerated()), id: \.offset) { index, match in
-                        Capsule()
-                            .fill(index == current ? Palette.accent : Palette.accentSoft)
-                            .frame(width: 2, height: 13)
-                            .offset(x: min(match.time / total, 1) * (proxy.size.width - 2), y: 3)
+                    // One drawing for every hit: a common word has thousands, and a view each would stall the page.
+                    Canvas { context, size in
+                        for (index, match) in search.matches.enumerated() where index != current {
+                            let x = min(match.time / total, 1) * (size.width - 2)
+                            context.fill(
+                                Path(roundedRect: CGRect(x: x, y: 3, width: 2, height: 13), cornerRadius: 1),
+                                with: .color(Palette.accentSoft))
+                        }
+                        if let current, search.matches.indices.contains(current) {
+                            let x = min(search.matches[current].time / total, 1) * (size.width - 2)
+                            context.fill(
+                                Path(roundedRect: CGRect(x: x, y: 3, width: 2, height: 13), cornerRadius: 1),
+                                with: .color(Palette.accent))
+                        }
                     }
+                    .allowsHitTesting(false)
                 }
             }
             .frame(height: 18)

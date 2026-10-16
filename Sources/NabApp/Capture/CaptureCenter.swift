@@ -165,8 +165,12 @@ final class CaptureCenter {
         fetch(id)
     }
 
+    /// Told which entries were removed, so chats about them stop and go (set by the assistant).
+    @ObservationIgnored var onRemove: (Set<String>) -> Void = { _ in }
+
     func remove(_ ids: Set<String>) {
         entries.removeAll { ids.contains($0.id) }
+        onRemove(ids)
         let store = store
         Task {
             do {

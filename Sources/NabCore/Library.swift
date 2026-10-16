@@ -82,8 +82,8 @@ public actor LibraryStore {
                 do {
                     return try decoder.decode(Entry.self, from: Data(contentsOf: file))
                 } catch {
-                    // Left on disk untouched, so a newer version or the user can still recover it.
                     NSLog("Nab: skipped unreadable \(file.lastPathComponent): \(error)")
+                    Self.setAside(file)
                     return nil
                 }
             }
@@ -97,6 +97,24 @@ public actor LibraryStore {
 
     public func delete(_ id: String) throws {
         try Self.remove(file(for: id))
+    }
+
+    /// Moves a file that could not be decoded next to where it was, as `<name>.json.corrupt`, so nothing is lost:
+    /// a newer version or the user can still recover it, and the next save under the same id cannot overwrite it.
+    /// The new name no longer ends in `.json`, so it is not read again.
+    static func setAside(_ file: URL) {
+        let fm = FileManager.default
+        var target = file.appendingPathExtension("corrupt")
+        var n = 1
+        while fm.fileExists(atPath: target.path) {
+            n += 1
+            target = file.appendingPathExtension("\(n).corrupt")
+        }
+        do {
+            try fm.moveItem(at: file, to: target)
+        } catch {
+            NSLog("Nab: could not set aside \(file.lastPathComponent): \(error)")
+        }
     }
 
     /// Removes a file; one that is already gone is not an error.

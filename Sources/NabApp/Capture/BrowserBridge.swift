@@ -76,7 +76,7 @@ enum BrowserBridge {
                 let output = NSAppleScript(source: source)?.executeAndReturnError(&error).stringValue
                 if let error {
                     let code = error[NSAppleScript.errorNumber] as? Int ?? 0
-                    continuation.resume(returning: .failure(code == -1743 ? .notAllowed(name) : .scriptFailed(name)))
+                    continuation.resume(returning: .failure(failure(code: code, browser: name)))
                     return
                 }
                 let lines = (output ?? "").split(separator: "\n", maxSplits: 1).map(String.init)
@@ -90,16 +90,31 @@ enum BrowserBridge {
     }
 }
 
+extension BrowserBridge {
+    /// -1743 is a refused permission. -1712 (event timeout) is what the very first request looks like while the
+    /// Automation prompt still waits for an answer, so it points at the permission too instead of a dead browser.
+    fileprivate static func failure(code: Int, browser: String) -> NabBridgeError {
+        switch code {
+        case -1743: .notAllowed(browser)
+        case -1712: .waitingForPermission(browser)
+        default: .scriptFailed(browser)
+        }
+    }
+}
+
 enum NabBridgeError: Error, Sendable {
     case noBrowser, noLink
     case notAllowed(String)
     case scriptFailed(String)
+    case waitingForPermission(String)
 
     var message: String {
         switch self {
         case .noBrowser: "No supported browser is open."
         case .noLink: "The front tab isn't a YouTube video."
         case .notAllowed(let browser): "Allow Nab in System Settings › Privacy & Security › Automation › \(browser)."
+        case .waitingForPermission(let browser):
+            "Answer the Automation prompt for \(browser), then try again. If none appeared: System Settings › Privacy & Security › Automation."
         case .scriptFailed(let browser): "\(browser) did not answer."
         }
     }
