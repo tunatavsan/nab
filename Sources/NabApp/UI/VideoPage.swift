@@ -53,6 +53,12 @@ private struct VideoContent: View {
             transcriptSection
         }
         .task(id: entry.id) { await loadTokens() }
+        // A window that opens focuses its first text field, which would light the find field whenever a video is
+        // opened from outside the library. Find takes focus only when asked: ⌘F or a click.
+        .task(id: entry.id) {
+            try? await Task.sleep(for: .milliseconds(120))
+            finding = false
+        }
         .onChange(of: capture?.transcript?.segments.count) { rebuildSearch() }
         // `initial` because a page opened by a transcript hit or a citation is created with the focus already set.
         .onChange(of: model.focus, initial: true) { _, focus in
@@ -143,15 +149,21 @@ private struct VideoContent: View {
             case .ready:
                 NabButton(
                     "Ask AI about this video", kind: .primary, size: .large, fullWidth: true, action: model.summarize)
-                HStack(spacing: Space.s) {
-                    NabButton(copiedContext ? "Copied" : "Copy context", fullWidth: true) {
-                        guard let capture else { return }
-                        Pasteboard.copy(ContextPack.render([capture]))
-                        flash($copiedContext)
+                Grid(horizontalSpacing: Space.s, verticalSpacing: Space.s) {
+                    GridRow {
+                        NabButton(copiedContext ? "Copied" : "Copy context", fullWidth: true) {
+                            guard let capture else { return }
+                            Pasteboard.copy(ContextPack.render([capture]))
+                            flash($copiedContext)
+                        }
+                        NabButton("Open on YouTube", fullWidth: true) { NSWorkspace.shared.open(entry.url) }
                     }
-                    NabButton("Fetch again", fullWidth: true) { model.center.retry(entry.id) }
+                    GridRow {
+                        NabButton("Export…", fullWidth: true, action: model.export)
+                            .help("Save the video's context as a Markdown file")
+                        NabButton("Fetch again", fullWidth: true) { model.center.retry(entry.id) }
+                    }
                 }
-                NabButton("Export", kind: .ghost, fullWidth: true, action: model.export)
             case .failed:
                 NabButton("Try again", kind: .primary, size: .large, fullWidth: true) { model.center.retry(entry.id) }
             case .fetching:
@@ -610,7 +622,7 @@ private struct VideoCover: View {
             Palette.well
                 .aspectRatio(16 / 9, contentMode: .fit)
                 .overlay {
-                    if let image {
+                    if let image = CoverCache.cached(entry) ?? image {
                         Image(nsImage: image).resizable().aspectRatio(contentMode: .fill).transition(.opacity)
                     }
                 }
@@ -646,6 +658,7 @@ private struct VideoCover: View {
         .help("Open the video")
         .accessibilityLabel("Open the video")
         .task(id: entry.id) {
+            guard CoverCache.cached(entry) == nil else { return }
             let loaded = await CoverCache.image(for: entry)
             withAnimation(Motion.settle) { image = loaded }
         }
@@ -655,6 +668,8 @@ private struct VideoCover: View {
 @MainActor
 enum CoverCache {
     private static let cache = NSCache<NSString, NSImage>()
+
+    static func cached(_ entry: Entry) -> NSImage? { cache.object(forKey: entry.id as NSString) }
 
     /// maxresdefault is missing on some videos (YouTube answers 404 with a tiny placeholder), so
     /// each candidate is checked for status and size before falling back.

@@ -7,6 +7,8 @@ import SwiftUI
 @MainActor
 final class LibraryWindowController: NSObject, NSWindowDelegate {
     static let windowID = NSUserInterfaceItemIdentifier("NabLibrary")
+    /// The window has one size: every page is laid out for it, so nothing reflows, crops or leaves a gap.
+    static let size = NSSize(width: 1240, height: 800)
     private let window: NSWindow
     private let model: LibraryModel
 
@@ -14,22 +16,33 @@ final class LibraryWindowController: NSObject, NSWindowDelegate {
         model = LibraryModel(center: center, assistant: assistant)
         let host = NSHostingController(rootView: LibraryView(model: model))
         host.sceneBridgingOptions = [.toolbars, .title]
+        host.sizingOptions = []
         window = NSWindow(contentViewController: host)
         super.init()
-        window.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
+        window.styleMask = [.titled, .closable, .miniaturizable, .fullSizeContentView]
+        window.collectionBehavior.insert(.fullScreenNone)
         window.toolbarStyle = .unified
         window.title = "Nab"
         window.titleVisibility = .hidden
         // The titlebar draws no material of its own, so the backdrop runs unbroken from top to bottom.
         window.titlebarAppearsTransparent = true
         window.titlebarSeparatorStyle = .none
-        window.setContentSize(NSSize(width: 1240, height: 800))
-        window.contentMinSize = NSSize(width: 960, height: 600)
         window.isReleasedWhenClosed = false
         window.setFrameAutosaveName("NabLibrary")
         window.identifier = Self.windowID
         window.delegate = self
-        if !window.setFrameUsingName("NabLibrary") { window.center() }
+        // Only the position is remembered; a frame saved while the window could be resized keeps its top-left corner.
+        let restored = window.setFrameUsingName("NabLibrary")
+        let topLeft = NSPoint(x: window.frame.minX, y: window.frame.maxY)
+        let screen = window.screen ?? NSScreen.main
+        window.setContentSize(
+            NSSize(width: Self.size.width, height: min(Self.size.height, screen?.visibleFrame.height ?? .infinity)))
+        if restored {
+            window.setFrameTopLeftPoint(topLeft)
+            window.setFrame(window.constrainFrameRect(window.frame, to: screen), display: false)
+        } else {
+            window.center()
+        }
     }
 
     /// Brings the window forward. One id opens that video, several (or `chat`) open a session page.
@@ -296,6 +309,22 @@ private struct BehindWindowBlur: NSViewRepresentable {
     func updateNSView(_ view: NSVisualEffectView, context: Context) {}
 }
 
+/// Content scrolled up under the toolbar fades out instead of running into its buttons. The system's scroll edge
+/// effect does not draw over this window's transparent titlebar, so the page masks itself.
+private struct ToolbarFade: View {
+    var body: some View {
+        GeometryReader { proxy in
+            let band = proxy.safeAreaInsets.top
+            VStack(spacing: 0) {
+                Color.clear.frame(height: max(band - 22, 0))
+                LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom).frame(height: 22)
+                Color.black
+            }
+            .ignoresSafeArea()
+        }
+    }
+}
+
 struct LibraryView: View {
     @Bindable var model: LibraryModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -304,39 +333,45 @@ struct LibraryView: View {
         ZStack {
             page
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .scrollEdgeEffectStyle(.soft, for: .top)
-                .blur(radius: model.searchQuery == nil ? 0 : 2)
+                .mask { ToolbarFade() }
+                // Scoped, so opening a result from the palette does not animate the page it opens.
+                .animation(Motion.resolved(Motion.snap, reduceMotion: reduceMotion)) {
+                    $0.blur(radius: model.searchQuery == nil ? 0 : 2)
+                }
             if model.searchQuery != nil {
-                SearchPalette(model: model).transition(.opacity)
+                SearchPalette(model: model)
+                    .transition(.opacity.animation(Motion.resolved(Motion.snap, reduceMotion: reduceMotion)))
             }
         }
         .background { WindowBackdrop().ignoresSafeArea() }
         .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
         // The breadcrumb names the page; without this the window title "Nab" sits next to it on inner pages.
         .toolbar(removing: .title)
-        .animation(Motion.resolved(Motion.settle, reduceMotion: reduceMotion), value: model.route)
-        .animation(Motion.resolved(Motion.snap, reduceMotion: reduceMotion), value: model.searchQuery == nil)
         .toolbar { toolbar }
         .background { hiddenShortcuts }
     }
 
+    /// One page at a time. The old page leaves at once and the new one fades in over the backdrop, so two
+    /// layouts never blend into each other.
     @ViewBuilder private var page: some View {
         switch model.route {
         case .home:
-            HomePage(model: model).transition(.opacity)
+            HomePage(model: model).transition(.page)
         case .session(let ids):
-            SessionPage(ids: ids, model: model).id(Conversation.id(for: ids)).transition(.opacity)
+            SessionPage(ids: ids, model: model).id(Conversation.id(for: ids)).transition(.page)
         case .video(let id):
-            VideoPage(entryID: id, model: model).id(id).transition(.opacity)
+            VideoPage(entryID: id, model: model).id(id).transition(.page)
         case .settings:
             SettingsView(
                 assistant: model.assistant, shortcutAvailable: model.center.shortcutAvailable,
                 unavailableShortcuts: model.center.unavailableShortcuts
             )
-            .transition(.opacity)
+            .transition(.page)
         }
     }
 
+    /// The same items on every page, each a fixed width, so nothing in the toolbar moves while you browse.
+    /// Actions that belong to one page live on that page.
     @ToolbarContentBuilder private var toolbar: some ToolbarContent {
         ToolbarItemGroup(placement: .navigation) {
             Button("Back", systemImage: "chevron.left", action: model.goBack)
@@ -347,33 +382,22 @@ struct LibraryView: View {
                 .keyboardShortcut("]", modifiers: .command)
                 .disabled(model.forwardStack.isEmpty)
                 .help("Forward (⌘])")
+        }
+        ToolbarItem(placement: .navigation) {
             Breadcrumb(model: model)
         }
+        .sharedBackgroundVisibility(.hidden)
         ToolbarItem(placement: .principal) {
             SearchPill { model.searchQuery = "" }
                 .keyboardShortcut("k", modifiers: .command)
         }
-        ToolbarItemGroup(placement: .primaryAction) {
-            switch model.route {
-            case .home:
-                NabButton("Nab a link", shortcut: "⇧⌘V", action: model.center.pasteLinks)
-                    .keyboardShortcut("v", modifiers: [.command, .shift])
-                    .help("Add every YouTube link on the clipboard (⇧⌘V)")
-            case .session:
-                NabButton("Copy all", shortcut: "⇧⌘C", action: model.copyContext)
-                    .keyboardShortcut("c", modifiers: [.command, .shift])
-                    .help("Copy the videos as a context pack for AI (⇧⌘C)")
-                NabButton("Copy chat", kind: .ghost, action: model.copyChat)
-                    .help("Copy this conversation as text")
-            case .video:
-                NabButton("Open on YouTube", kind: .ghost) {
-                    if case .video(let id) = model.route, let url = model.center.entry(id)?.url {
-                        NSWorkspace.shared.open(url)
-                    }
-                }
-            case .settings:
-                EmptyView()
-            }
+        ToolbarItem(placement: .primaryAction) {
+            NabButton("Nab a link", shortcut: "⇧⌘V", action: model.center.pasteLinks)
+                .keyboardShortcut("v", modifiers: [.command, .shift])
+                .help("Add every YouTube link on the clipboard (⇧⌘V)")
+        }
+        .sharedBackgroundVisibility(.hidden)
+        ToolbarItem(placement: .primaryAction) {
             Button("Settings", systemImage: "gearshape") { model.go(.settings) }
                 .keyboardShortcut(",", modifiers: .command)
                 .help("Settings (⌘,)")
@@ -384,21 +408,13 @@ struct LibraryView: View {
     @ViewBuilder private var hiddenShortcuts: some View {
         ZStack {
             Button("Ask AI", action: model.askAboutPage).keyboardShortcut("j", modifiers: .command)
-            if model.route != .home, !isSession {
-                Button("Copy context", action: model.copyContext).keyboardShortcut("c", modifiers: [.command, .shift])
-            }
             if model.route != .home {
-                Button("Paste links", action: model.center.pasteLinks)
-                    .keyboardShortcut("v", modifiers: [.command, .shift])
+                Button("Copy context", action: model.copyContext).keyboardShortcut("c", modifiers: [.command, .shift])
             }
         }
         .opacity(0)
         .allowsHitTesting(false)
         .accessibilityHidden(true)
-    }
-
-    private var isSession: Bool {
-        if case .session = model.route { true } else { false }
     }
 }
 
@@ -421,10 +437,12 @@ private struct Breadcrumb: View {
                     .font(Typeface.rowTitle)
                     .foregroundStyle(Palette.ink)
                     .lineLimit(1)
-                    .frame(maxWidth: 200, alignment: .leading)
+                    .truncationMode(.tail)
             }
         }
-        .padding(.leading, Space.s)
+        .padding(.horizontal, Space.s)
+        // A fixed width keeps the search field and the buttons where they are on every page.
+        .frame(width: 300, alignment: .leading)
         .accessibilityElement(children: .contain)
     }
 

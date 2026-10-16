@@ -22,7 +22,8 @@ struct SessionPage: View {
     var body: some View {
         HStack(spacing: 0) {
             VStack(spacing: 0) {
-                SourcesStrip(entries: entries, numbered: numbered, selected: drawerID) { entry in
+                SourcesStrip(entries: entries, numbered: numbered, selected: drawerID, copy: model.copyContext) {
+                    entry in
                     withAnimation(Motion.settle) {
                         drawerID = entry.id
                         drawerFocus = nil
@@ -80,11 +81,18 @@ private struct SourcesStrip: View {
     let entries: [Entry]
     let numbered: [Entry]
     let selected: String?
+    let copy: () -> Void
     let open: (Entry) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Sources · \(entries.count)").font(Typeface.label).foregroundStyle(Palette.inkTertiary)
+        VStack(alignment: .leading, spacing: Space.s) {
+            HStack {
+                Text("Sources · \(entries.count)").font(Typeface.label).foregroundStyle(Palette.inkTertiary)
+                Spacer(minLength: Space.s)
+                // ⇧⌘C is the library's copy-context shortcut on every page.
+                NabButton("Copy all", shortcut: "⇧⌘C", kind: .ghost, action: copy)
+                    .help("Copy the videos as a context pack for AI (⇧⌘C)")
+            }
             GeometryReader { proxy in
                 let width = max(
                     200, (proxy.size.width - CGFloat(entries.count - 1) * 10) / CGFloat(max(entries.count, 1)))
@@ -104,7 +112,8 @@ private struct SourcesStrip: View {
             .frame(height: 56)
         }
         .padding(.horizontal, Space.xl)
-        .padding(.vertical, Space.l)
+        .padding(.top, Space.s)
+        .padding(.bottom, Space.l)
         .background(Palette.sunken.opacity(0.6))
         .overlay(alignment: .bottom) { Rectangle().fill(Palette.line).frame(height: 1) }
     }

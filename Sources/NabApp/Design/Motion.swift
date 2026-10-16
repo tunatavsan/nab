@@ -15,6 +15,8 @@ enum Motion {
     static let press = Animation.spring(response: 0.2, dampingFraction: 0.7)
     /// Rows arriving, content swapping, the panel growing.
     static let settle = Animation.spring(response: 0.42, dampingFraction: 0.84)
+    /// A library page fading in; short, so a click feels instant and two pages never show at once.
+    static let pageIn = Animation.easeOut(duration: 0.16)
 
     /// Fades a search hit's highlight back out.
     static let highlightFade = Animation.easeOut(duration: 0.8)
@@ -26,6 +28,12 @@ enum Motion {
 }
 
 extension AnyTransition {
+    /// One view standing in for another (a library page, a chat's intro and its thread): the old one leaves at once
+    /// and the new one fades in, so two layouts never blend into each other.
+    static var page: AnyTransition {
+        .asymmetric(insertion: .opacity.animation(Motion.pageIn), removal: .identity)
+    }
+
     static var rise: AnyTransition {
         .asymmetric(
             insertion: .opacity.combined(with: .offset(y: 6)).combined(with: .scale(scale: 0.96, anchor: .top)),

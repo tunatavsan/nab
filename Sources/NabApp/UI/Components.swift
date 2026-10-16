@@ -208,14 +208,14 @@ struct Thumbnail: View {
     var radius: CGFloat = Radius.thumbSmall
     var showsDuration = false
     var badge: Badge?
+    @State private var loaded: NSImage?
 
     var body: some View {
         ZStack {
             Palette.well
-            AsyncImage(url: entry.thumbnailURL, transaction: Transaction(animation: Motion.snap)) { phase in
-                if let image = phase.image {
-                    image.resizable().aspectRatio(contentMode: .fill).transition(.opacity)
-                }
+            // A thumbnail seen before is drawn in the first frame; only one loading for the first time fades in.
+            if let image = ThumbnailCache.cached(entry.thumbnailURL) ?? loaded {
+                Image(nsImage: image).resizable().aspectRatio(contentMode: .fill).transition(.opacity)
             }
             switch entry.phase {
             case .fetching:
@@ -258,6 +258,28 @@ struct Thumbnail: View {
         .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(Palette.line))
         .animation(Motion.snap, value: entry.phase)
         .accessibilityLabel(entry.title)
+        .task(id: entry.thumbnailURL) {
+            guard let url = entry.thumbnailURL, ThumbnailCache.cached(url) == nil else { return }
+            let image = await ThumbnailCache.image(url)
+            withAnimation(Motion.snap) { loaded = image }
+        }
+    }
+}
+
+/// Thumbnails kept in memory for the session, so a page that comes back shows them at once.
+@MainActor
+enum ThumbnailCache {
+    private static let cache = NSCache<NSURL, NSImage>()
+
+    static func cached(_ url: URL?) -> NSImage? { url.flatMap { cache.object(forKey: $0 as NSURL) } }
+
+    static func image(_ url: URL) async -> NSImage? {
+        if let hit = cached(url) { return hit }
+        guard let (data, response) = try? await URLSession.shared.data(from: url),
+            (response as? HTTPURLResponse)?.statusCode == 200, let image = NSImage(data: data)
+        else { return nil }
+        cache.setObject(image, forKey: url as NSURL)
+        return image
     }
 }
 
@@ -623,8 +645,7 @@ struct SearchPill: View {
             .foregroundStyle(Palette.inkTertiary)
             .padding(.leading, 12)
             .padding(.trailing, 8)
-            .frame(minWidth: 220, idealWidth: 440, maxWidth: 440)
-            .frame(height: 32)
+            .frame(width: 440, height: 32)
             .background(hovering ? Palette.selected : Palette.raised, in: .capsule)
             .overlay(Capsule().strokeBorder(Palette.line))
             .contentShape(.capsule)

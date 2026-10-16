@@ -23,16 +23,15 @@ struct ChatView: View {
         ZStack(alignment: .bottom) {
             ZStack {
                 if messages.isEmpty {
-                    intro.transition(.opacity)
+                    intro.transition(.page)
                 } else {
-                    thread(messages, busy: busy).transition(.opacity)
+                    thread(messages, busy: busy).transition(.page)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             composer(busy: busy)
         }
         .environment(\.openURL, OpenURLAction(handler: cite))
-        .animation(Motion.settle, value: messages.isEmpty)
         .task(id: entryIDs) { await assistant.load(entryIDs) }
         .onAppear { composing = true }
     }
@@ -86,9 +85,13 @@ struct ChatView: View {
                 Text(meta(messages)).font(Typeface.meta).foregroundStyle(Palette.inkTertiary)
             }
             Spacer(minLength: Space.s)
-            NabButton("New chat", kind: .ghost) { assistant.clear(entryIDs) }
-                .disabled(busy)
-                .help("Start a new chat about these videos")
+            HStack(spacing: Space.xs) {
+                NabButton("Copy chat", kind: .ghost, action: model.copyChat)
+                    .help("Copy this conversation as text")
+                NabButton("New chat", kind: .ghost) { assistant.clear(entryIDs) }
+                    .disabled(busy)
+                    .help("Start a new chat about these videos")
+            }
         }
     }
 
