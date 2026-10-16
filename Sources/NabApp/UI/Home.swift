@@ -86,40 +86,53 @@ struct HomePage: View {
                     .disabled(ready.isEmpty)
                     .help("Chat about the session and summarize it")
             }
-            let columns = columnCount
-            let cardWidth = (contentWidth - CGFloat(columns - 1) * Space.l) / CGFloat(columns)
-            LazyVGrid(
-                columns: Array(repeating: GridItem(.flexible(), spacing: Space.l, alignment: .top), count: columns),
-                alignment: .leading, spacing: Space.xl
-            ) {
-                ForEach(session.entryIDs, id: \.self) { id in
-                    if let entry = center.entry(id) {
-                        VideoCard(entry: entry, model: model, width: cardWidth, onClipboard: clipboardID == id)
-                    }
-                }
-                ForEach(session.chats) { chat in
-                    ChatCard(chat: chat, model: model, width: cardWidth)
-                }
-            }
+            grid([cells(of: session)], sessions: nil, columns: Self.openColumns, large: true)
         }
     }
 
     private func daySection(_ day: HomeDay) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             SectionHeader(title: day.title)
-            WrapLayout(spacing: 28, lineSpacing: 20) {
-                ForEach(day.sessions) { session in
-                    VStack(alignment: .leading, spacing: 10) {
-                        SessionLabel(session: session, model: model)
-                        WrapLayout(spacing: Space.m, lineSpacing: Space.l) {
-                            ForEach(session.entryIDs, id: \.self) { id in
-                                if let entry = center.entry(id) {
-                                    VideoCard(entry: entry, model: model, width: 196, small: true)
-                                }
-                            }
-                            ForEach(session.chats) { chat in
-                                ChatCard(chat: chat, model: model, width: 196, small: true)
-                            }
+            grid(day.sessions.map(cells(of:)), sessions: day.sessions, columns: Self.dayColumns, large: false)
+        }
+    }
+
+    // MARK: Grid
+
+    /// A card on the grid: a video or a chat.
+    private enum Cell: Identifiable {
+        case video(Entry)
+        case chat(ChatPreview)
+
+        var id: String {
+            switch self {
+            case .video(let entry): "v-" + entry.id
+            case .chat(let chat): "c-" + chat.id
+            }
+        }
+    }
+
+    private func cells(of session: HomeSession) -> [Cell] {
+        session.entryIDs.compactMap { center.entry($0).map(Cell.video) } + session.chats.map(Cell.chat)
+    }
+
+    /// One aligned grid of equal columns. Each session's cells follow the previous session's, wrapping at the
+    /// right edge; with `sessions`, a band above every row labels each session's run of cells.
+    private func grid(_ groups: [[Cell]], sessions: [HomeSession]?, columns: Int, large: Bool) -> some View {
+        let flat = groups.flatMap { $0 }
+        let runs = HomeGrid.runs(itemCounts: groups.map(\.count), columns: columns)
+        let cardWidth = (contentWidth - CGFloat(columns - 1) * Space.l) / CGFloat(columns)
+        let rows = stride(from: 0, to: flat.count, by: columns).map { Array(flat[$0..<min($0 + columns, flat.count)]) }
+        return VStack(alignment: .leading, spacing: Space.xl) {
+            ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
+                VStack(alignment: .leading, spacing: 8) {
+                    if let sessions {
+                        runBand(runs.filter { $0.row == index }, sessions: sessions, cardWidth: cardWidth)
+                    }
+                    HStack(alignment: .top, spacing: Space.l) {
+                        ForEach(row) { cell in
+                            card(cell, width: cardWidth, large: large)
+                                .frame(width: cardWidth, alignment: .topLeading)
                         }
                     }
                 }
@@ -127,10 +140,44 @@ struct HomePage: View {
         }
     }
 
+    /// The label band of one grid row: a rule under each run's cells, the session label on the first run.
+    private func runBand(_ runs: [HomeGrid.Run], sessions: [HomeSession], cardWidth: CGFloat) -> some View {
+        ZStack(alignment: .topLeading) {
+            ForEach(runs, id: \.column) { run in
+                VStack(alignment: .leading, spacing: 4) {
+                    Group {
+                        if run.continues {
+                            Color.clear
+                        } else {
+                            SessionLabel(session: sessions[run.session], model: model)
+                        }
+                    }
+                    .frame(height: 20, alignment: .leading)
+                    Rectangle().fill(Palette.line).frame(height: 1)
+                }
+                .frame(width: CGFloat(run.length) * cardWidth + CGFloat(run.length - 1) * Space.l)
+                .offset(x: CGFloat(run.column) * (cardWidth + Space.l))
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 25, maxHeight: 25, alignment: .topLeading)
+    }
+
+    @ViewBuilder
+    private func card(_ cell: Cell, width: CGFloat, large: Bool) -> some View {
+        switch cell {
+        case .video(let entry):
+            VideoCard(entry: entry, model: model, width: width, small: !large, onClipboard: clipboardID == entry.id)
+        case .chat(let chat):
+            ChatCard(chat: chat, model: model, width: width, small: !large)
+        }
+    }
+
     // MARK: Helpers
 
     private var contentWidth: CGFloat { max(width - 56, 600) }
-    private var columnCount: Int { max(2, Int((contentWidth + Space.l) / (240 + Space.l))) }
+    /// Columns are fixed so cards line up the same way at every width; only their width follows the window.
+    private static let dayColumns = 5
+    private static let openColumns = 4
 
     private func clock(_ date: Date) -> String {
         date.formatted(date: .omitted, time: .shortened)
@@ -326,6 +373,7 @@ private struct SessionLabel: View {
                     Text(" · " + parts[1]).font(Typeface.meta).foregroundStyle(Palette.inkTertiary)
                 }
             }
+            .lineLimit(1)
             .padding(.horizontal, 6).padding(.vertical, 2)
             .background(hovering ? Palette.hover : .clear, in: .rect(cornerRadius: Radius.chip, style: .continuous))
         }
@@ -339,44 +387,5 @@ private struct SessionLabel: View {
             Button("Copy Context") { model.copyContext(of: ready) }.disabled(ready.isEmpty)
             Button("Summarize") { model.ask(about: ready) }.disabled(ready.isEmpty)
         }
-    }
-}
-
-/// Lays its subviews out left to right and wraps at the proposed width.
-struct WrapLayout: Layout {
-    var spacing: CGFloat = 12
-    var lineSpacing: CGFloat = 12
-
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        arrange(proposal.width ?? .infinity, subviews).size
-    }
-
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        let result = arrange(bounds.width, subviews)
-        for (index, frame) in result.frames.enumerated() {
-            subviews[index].place(
-                at: CGPoint(x: bounds.minX + frame.minX, y: bounds.minY + frame.minY), proposal: .init(frame.size))
-        }
-    }
-
-    private func arrange(_ maxWidth: CGFloat, _ subviews: Subviews) -> (size: CGSize, frames: [CGRect]) {
-        var frames: [CGRect] = []
-        var x: CGFloat = 0
-        var y: CGFloat = 0
-        var lineHeight: CGFloat = 0
-        var widest: CGFloat = 0
-        for subview in subviews {
-            let size = subview.sizeThatFits(.init(width: maxWidth, height: nil))
-            if x > 0, x + size.width > maxWidth {
-                x = 0
-                y += lineHeight + lineSpacing
-                lineHeight = 0
-            }
-            frames.append(CGRect(origin: CGPoint(x: x, y: y), size: size))
-            x += size.width + spacing
-            lineHeight = max(lineHeight, size.height)
-            widest = max(widest, x - spacing)
-        }
-        return (CGSize(width: widest, height: y + lineHeight), frames)
     }
 }
