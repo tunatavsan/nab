@@ -292,6 +292,7 @@ struct NabButton: View {
 
     let title: String
     var shortcut: String?
+    var combo: KeyCombo?
     var kind = Kind.secondary
     var size = Size.regular
     var fullWidth = false
@@ -300,11 +301,12 @@ struct NabButton: View {
     @Environment(\.isEnabled) private var enabled
 
     init(
-        _ title: String, shortcut: String? = nil, kind: Kind = .secondary, size: Size = .regular,
-        fullWidth: Bool = false, action: @escaping () -> Void
+        _ title: String, shortcut: String? = nil, combo: KeyCombo? = nil, kind: Kind = .secondary,
+        size: Size = .regular, fullWidth: Bool = false, action: @escaping () -> Void
     ) {
         self.title = title
         self.shortcut = shortcut
+        self.combo = combo
         self.kind = kind
         self.size = size
         self.fullWidth = fullWidth
@@ -319,6 +321,7 @@ struct NabButton: View {
                     Text(shortcut).font(Typeface.chip).opacity(kind == .primary ? 0.6 : 1)
                         .foregroundStyle(kind == .primary ? Palette.onAccent : Palette.inkTertiary)
                 }
+                KeyCaps(combo, surface: kind == .primary ? .accent : .neutral)
             }
             .foregroundStyle(foreground)
             .padding(.horizontal, size == .large ? 16 : 12)
@@ -355,26 +358,12 @@ struct NabButton: View {
     }
 }
 
-/// One key of a shortcut.
+/// One key given as text, for places that name a fixed key (Tab, ⇧⌘V); shortcuts the user can change use `KeyCaps`.
 struct Keycap: View {
     let text: String
     init(_ text: String) { self.text = text }
 
-    var body: some View {
-        Text(text)
-            .font(Typeface.mono)
-            .foregroundStyle(Palette.ink)
-            .padding(.horizontal, 6)
-            .frame(minWidth: 24, minHeight: 24)
-            .background(Palette.control, in: .rect(cornerRadius: Radius.chip, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: Radius.chip, style: .continuous).strokeBorder(Palette.controlBorder)
-            )
-            .overlay(alignment: .bottom) {
-                Capsule().fill(Palette.controlBorder).frame(height: 1).padding(.horizontal, 3)
-            }
-            .accessibilityLabel(text)
-    }
+    var body: some View { KeyCap(text, size: .small).accessibilityLabel(text) }
 }
 
 struct KeycapRow: View {
@@ -382,9 +371,11 @@ struct KeycapRow: View {
     init(_ keys: [String]) { self.keys = keys }
 
     var body: some View {
-        HStack(spacing: Space.xs) { ForEach(Array(keys.enumerated()), id: \.offset) { Keycap($0.element) } }
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(keys.joined(separator: " "))
+        HStack(spacing: Space.xs) {
+            ForEach(Array(keys.enumerated()), id: \.offset) { KeyCap($0.element, size: .medium) }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(keys.joined(separator: " "))
     }
 }
 

@@ -35,8 +35,6 @@ final class CaptureCenter {
     private var fetching: Set<String> = []
     /// False when the system refused the global shortcut, so the interface stops advertising it.
     var shortcutAvailable = true
-    /// Shortcuts the system refused, such as "⌃⌥A", so the interface stops advertising them.
-    var unavailableShortcuts: [String] = []
 
     /// The open capture session: the videos nabbed in one burst, copied together into one AI conversation.
     private(set) var sessionID: String?
@@ -231,7 +229,11 @@ final class CaptureCenter {
     func copySession() {
         let captures = trayCaptures
         guard !captures.isEmpty else {
-            show(.init(tone: .failed, title: "Nothing to copy yet", detail: "Press ⌃⌥N with a video in front."))
+            show(
+                .init(
+                    tone: .failed, title: "Nothing to copy yet",
+                    detail: "Press \(ShortcutStore.shared.text(for: .nab) ?? "the Nab shortcut") with a video in front."
+                ))
             return
         }
         let text = ContextPack.render(captures)
@@ -284,7 +286,9 @@ final class CaptureCenter {
         } else {
             show(
                 .init(
-                    tone: .done, title: entry.title, detail: "Ready · clipboard changed, ⌃⌥A copies the session",
+                    tone: .done, title: entry.title,
+                    detail:
+                        "Ready · clipboard changed, \(ShortcutStore.shared.text(for: .copySession) ?? "Copy all") copies the session",
                     thumbnail: entry.thumbnailURL))
         }
     }

@@ -363,8 +363,7 @@ struct LibraryView: View {
             VideoPage(entryID: id, model: model).id(id).transition(.page)
         case .settings:
             SettingsView(
-                assistant: model.assistant, shortcutAvailable: model.center.shortcutAvailable,
-                unavailableShortcuts: model.center.unavailableShortcuts
+                assistant: model.assistant, shortcutAvailable: model.center.shortcutAvailable
             )
             .transition(.page)
         }

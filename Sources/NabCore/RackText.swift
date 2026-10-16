@@ -3,17 +3,17 @@ import Foundation
 /// The words on the session rack under the menu bar icon, kept apart from the view so they can be tested.
 public enum RackText {
     public struct Hint: Equatable, Sendable {
-        public let key: String
+        public let action: ShortcutAction
         public let label: String
     }
 
-    /// The shortcut hints in the rack footer, without the shortcuts the system refused.
-    public static func hints(unavailable: [String]) -> [Hint] {
+    /// The shortcut hints in the rack footer, without the shortcuts the system refused or the user cleared.
+    public static func hints(map: ShortcutMap, unavailable: Set<ShortcutAction>) -> [Hint] {
         [
-            Hint(key: "⌃⌥A", label: "Copy all"),
-            Hint(key: "⌃⌥S", label: "Ask AI"),
-            Hint(key: "⌃⌥X", label: "New session"),
-        ].filter { !unavailable.contains($0.key) }
+            Hint(action: .copySession, label: "Copy all"),
+            Hint(action: .summarize, label: "Ask AI"),
+            Hint(action: .newSession, label: "New session"),
+        ].filter { !unavailable.contains($0.action) && map.combo(for: $0.action) != nil }
     }
 
     /// "Session · 3 videos".

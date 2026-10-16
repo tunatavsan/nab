@@ -5,12 +5,16 @@ import Testing
 
 @Suite struct RackTextTests {
     @Test func hintsListEveryShortcutByDefault() {
-        #expect(RackText.hints(unavailable: []).map(\.key) == ["⌃⌥A", "⌃⌥S", "⌃⌥X"])
+        let hints = RackText.hints(map: ShortcutMap(), unavailable: [])
+        #expect(hints.map(\.action) == [.copySession, .summarize, .newSession])
     }
 
-    @Test func hintsOmitRefusedShortcuts() {
-        #expect(RackText.hints(unavailable: ["⌃⌥S"]).map(\.key) == ["⌃⌥A", "⌃⌥X"])
-        #expect(RackText.hints(unavailable: ["⌃⌥A", "⌃⌥S", "⌃⌥X"]).isEmpty)
+    @Test func hintsOmitRefusedAndClearedShortcuts() {
+        var map = ShortcutMap()
+        #expect(RackText.hints(map: map, unavailable: [.summarize]).map(\.action) == [.copySession, .newSession])
+        map.set(nil, for: .newSession)
+        #expect(RackText.hints(map: map, unavailable: [.summarize]).map(\.action) == [.copySession])
+        #expect(RackText.hints(map: map, unavailable: [.copySession, .summarize]).isEmpty)
     }
 
     @Test func headerPluralizes() {

@@ -170,7 +170,8 @@ private struct RackView: View {
         case .stack:
             StackCard(
                 session: session, copied: !center.copiedIDs.isDisjoint(with: session.map(\.id)),
-                shortcuts: RackText.hints(unavailable: center.unavailableShortcuts).map(\.key),
+                shortcuts: RackText.hints(map: ShortcutStore.shared.map, unavailable: ShortcutStore.shared.unavailable)
+                    .map(\.action),
                 copyAll: { center.copySession() },
                 askAI: { summarize(center.sessionSummaryIDs()) }
             )
@@ -342,7 +343,7 @@ private struct MessageCard: View {
 private struct StackCard: View {
     let session: [Entry]
     let copied: Bool
-    let shortcuts: [String]
+    let shortcuts: [ShortcutAction]
     let copyAll: () -> Void
     let askAI: () -> Void
 
@@ -380,14 +381,17 @@ private struct StackCard: View {
             }
             .frame(height: 34)
             HStack(spacing: 6) {
-                RackButton(title: "Copy all", shortcut: shortcuts.contains("⌃⌥A") ? "⌃⌥A" : nil, action: copyAll)
-                RackButton(
-                    title: "Ask AI", shortcut: shortcuts.contains("⌃⌥S") ? "⌃⌥S" : nil, primary: true, action: askAI)
+                RackButton(title: "Copy all", combo: combo(.copySession), action: copyAll)
+                RackButton(title: "Ask AI", combo: combo(.summarize), primary: true, action: askAI)
             }
         }
         .padding(RackMetrics.cardPadding)
         .frame(height: RackMetrics.cardHeight(.stack) - RackMetrics.peek * 2)
         .cell()
+    }
+
+    private func combo(_ action: ShortcutAction) -> KeyCombo? {
+        shortcuts.contains(action) ? ShortcutStore.shared.combo(for: action) : nil
     }
 
     /// Up to three thumbnails fanned out, the newest in front at the bottom left.
@@ -405,7 +409,7 @@ private struct StackCard: View {
 
 private struct RackButton: View {
     let title: String
-    var shortcut: String?
+    var combo: KeyCombo?
     var primary = false
     let action: () -> Void
     @State private var hovering = false
@@ -414,11 +418,7 @@ private struct RackButton: View {
         Button(action: action) {
             HStack(spacing: 6) {
                 Text(title).font(Typeface.button)
-                if let shortcut {
-                    Text(shortcut).font(Typeface.chip)
-                        .opacity(primary ? 0.6 : 1)
-                        .foregroundStyle(primary ? Palette.onAccent : Palette.inkTertiary)
-                }
+                KeyCaps(combo, surface: primary ? .accent : .neutral)
             }
             .foregroundStyle(primary ? Palette.onAccent : Palette.ink)
             .frame(maxWidth: .infinity)

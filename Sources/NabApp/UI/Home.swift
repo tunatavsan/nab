@@ -71,6 +71,7 @@ struct HomePage: View {
 
     private func openSection(_ session: HomeSession) -> some View {
         let ready = session.allEntryIDs.filter { center.entry($0)?.capture != nil }
+        let shortcuts = ShortcutStore.shared
         return VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: Space.s) {
                 SectionHeader(
@@ -78,11 +79,13 @@ struct HomePage: View {
                     detail:
                         "\(session.allEntryIDs.count) video\(session.allEntryIDs.count == 1 ? "" : "s") · since \(clock(session.start))",
                     live: true)
-                NabButton("End session", shortcut: "⌃⌥X", kind: .ghost) { center.closeSession(announce: true) }
-                    .help("Close this session; the next video starts a new one")
-                NabButton("Copy all", shortcut: "⌃⌥A") { center.copySession() }
+                NabButton("End session", combo: shortcuts.combo(for: .newSession), kind: .ghost) {
+                    center.closeSession(announce: true)
+                }
+                .help("Close this session; the next video starts a new one")
+                NabButton("Copy all", combo: shortcuts.combo(for: .copySession)) { center.copySession() }
                     .help("Copy the session's videos as one context pack")
-                NabButton("Ask AI", shortcut: "⌃⌥S", kind: .primary) { model.ask(about: ready) }
+                NabButton("Ask AI", combo: shortcuts.combo(for: .summarize), kind: .primary) { model.ask(about: ready) }
                     .disabled(ready.isEmpty)
                     .help("Chat about the session and summarize it")
             }

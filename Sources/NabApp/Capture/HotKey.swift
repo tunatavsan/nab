@@ -25,6 +25,13 @@ final class HotKey {
         Self.actions[id] = action
     }
 
+    /// Gives the key back to the system. The handler for its id stays until the next hot key with that id replaces it.
+    func unregister() {
+        guard let reference else { return }
+        UnregisterEventHotKey(reference)
+        self.reference = nil
+    }
+
     private static func installHandler() throws {
         guard handler == nil else { return }
         var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))

@@ -8,7 +8,6 @@ import SwiftUI
 struct SettingsView: View {
     @Bindable var assistant: Assistant
     let shortcutAvailable: Bool
-    var unavailableShortcuts: [String] = []
 
     var body: some View {
         ScrollView {
@@ -20,8 +19,7 @@ struct SettingsView: View {
                     .accessibilityAddTraits(.isHeader)
                 SettingsAICard(assistant: assistant)
                 SettingsCaptureSection()
-                SettingsShortcutsSection(
-                    shortcutAvailable: shortcutAvailable, unavailableShortcuts: unavailableShortcuts)
+                SettingsShortcutsSection()
                 SettingsPromptsSection(assistant: assistant)
             }
             .frame(width: 680, alignment: .leading)
@@ -71,39 +69,6 @@ private struct SettingsCaptureSection: View {
             loginError = error.localizedDescription
             openAtLogin = SMAppService.mainApp.status == .enabled
         }
-    }
-}
-
-// MARK: Shortcuts
-
-private struct SettingsShortcutsSection: View {
-    let shortcutAvailable: Bool
-    let unavailableShortcuts: [String]
-
-    private static let shortcuts: [(keys: [String], title: String)] = [
-        (["⌃", "⌥", "N"], "Nab the YouTube tab in front"),
-        (["⌃", "⌥", "A"], "Copy the whole session"),
-        (["⌃", "⌥", "S"], "Ask AI about the session"),
-        (["⌃", "⌥", "X"], "Start a new session"),
-    ]
-
-    var body: some View {
-        SettingsSection(title: "Shortcuts", footnote: "Work in any app.") {
-            SettingsGroup {
-                ForEach(Self.shortcuts, id: \.title) { shortcut in
-                    SettingsRow(
-                        title: shortcut.title, detail: available(shortcut.keys) ? nil : "In use by another app",
-                        detailIsError: true
-                    ) {
-                        KeycapRow(shortcut.keys)
-                    }
-                }
-            }
-        }
-    }
-
-    private func available(_ keys: [String]) -> Bool {
-        keys.last == "N" ? shortcutAvailable : !unavailableShortcuts.contains(keys.joined())
     }
 }
 

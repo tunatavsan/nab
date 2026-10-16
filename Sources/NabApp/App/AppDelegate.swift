@@ -15,7 +15,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // ⌘O carries the conversation over, so even one video opens on its chat rather than its transcript.
         openLibrary: { [weak self] ids in self?.libraryWindow().show(select: ids, chat: true) },
         openVideo: { [weak self] id, seconds in self?.libraryWindow().showVideo(id, at: seconds) })
-    private var hotKeys: [HotKey] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -55,30 +54,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func registerShortcuts() {
-        let shortcuts: [(name: String, key: Int, id: UInt32, action: () -> Void)] = [
-            ("⌃⌥N", kVK_ANSI_N, 1, { [weak self] in self?.nabFrontTab() }),
-            ("⌃⌥A", kVK_ANSI_A, 2, { [weak self] in self?.center.copySession() }),
-            (
-                "⌃⌥S", kVK_ANSI_S, 3,
-                { [weak self] in
-                    guard let self else { return }
-                    if askWindow.isVisible { askWindow.close() } else { summarize(center.sessionSummaryIDs()) }
-                }
-            ),
-            ("⌃⌥X", kVK_ANSI_X, 4, { [weak self] in self?.center.closeSession(announce: true) }),
-        ]
-        for shortcut in shortcuts {
-            do {
-                hotKeys.append(
-                    try HotKey(
-                        keyCode: shortcut.key, modifiers: controlKey | optionKey, id: shortcut.id,
-                        action: shortcut.action))
-            } catch {
-                if shortcut.id == 1 { center.shortcutAvailable = false }
-                center.unavailableShortcuts.append(shortcut.name)
-                NSLog("Nab: the %@ shortcut is unavailable: %@", shortcut.name, error.localizedDescription)
-            }
+        let shortcuts = ShortcutStore.shared
+        shortcuts.onRegistered = { [weak self] in
+            self?.center.shortcutAvailable = ShortcutStore.shared.isActive(.nab)
         }
+        shortcuts.install(handlers: [
+            .nab: { [weak self] in self?.nabFrontTab() },
+            .copySession: { [weak self] in self?.center.copySession() },
+            .summarize: { [weak self] in
+                guard let self else { return }
+                if askWindow.isVisible { askWindow.close() } else { summarize(center.sessionSummaryIDs()) }
+            },
+            .newSession: { [weak self] in self?.center.closeSession(announce: true) },
+        ])
     }
 
     /// `nab://front` does what the shortcut does; `nab://add?url=…` adds links; `nab://chat?url=…` adds them and

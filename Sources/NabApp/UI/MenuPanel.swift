@@ -320,23 +320,28 @@ private struct MenuPanelView: View {
 
     private func actionButtons(_ tray: [Entry]) -> some View {
         let ready = tray.contains { $0.capture != nil }
-        let unavailable = center.unavailableShortcuts
-        func key(_ shortcut: String) -> String? { unavailable.contains(shortcut) ? nil : shortcut }
+        let shortcuts = ShortcutStore.shared
+        func key(_ action: ShortcutAction) -> KeyCombo? {
+            shortcuts.isActive(action) ? shortcuts.combo(for: action) : nil
+        }
         return HStack(spacing: PanelMetrics.gap) {
-            ActionTile(label: "Copy all", shortcut: key("⌃⌥A"), enabled: ready, action: actions.copyAll)
+            ActionTile(label: "Copy all", combo: key(.copySession), enabled: ready, action: actions.copyAll)
             ActionTile(
-                label: "Ask AI", shortcut: key("⌃⌥S"), primary: true, enabled: ready
+                label: "Ask AI", combo: key(.summarize), primary: true, enabled: ready
             ) {
                 actions.summarize(center.sessionSummaryIDs())
             }
-            ActionTile(label: "New session", shortcut: key("⌃⌥X"), enabled: !tray.isEmpty, action: actions.newSession)
+            ActionTile(
+                label: "New session", combo: key(.newSession), enabled: !tray.isEmpty, action: actions.newSession)
         }
     }
 
     private func menu(earlier: Int) -> some View {
         VStack(spacing: 0) {
             MenuRow(
-                label: "Nab the YouTube tab in front", trailing: center.shortcutAvailable ? "⌃⌥N" : "no shortcut",
+                label: "Nab the YouTube tab in front",
+                trailing: ShortcutStore.shared.isActive(.nab) ? nil : "no shortcut",
+                combo: ShortcutStore.shared.isActive(.nab) ? ShortcutStore.shared.combo(for: .nab) : nil,
                 action: actions.nabFrontTab)
             MenuRow(label: "Paste links", action: actions.pasteLinks)
             MenuRow(label: "Export session…", enabled: !center.trayCaptures.isEmpty, action: actions.exportTray)
@@ -413,10 +418,14 @@ private struct SessionCell: View {
     }
 
     private var empty: some View {
-        Text(
-            center.shortcutAvailable
-                ? "Press ⌃⌥N with a YouTube video in front, and it lands here."
-                : "Nab the tab from the list below; ⌃⌥N is in use by another app."
+        let shortcuts = ShortcutStore.shared
+        let name = shortcuts.text(for: .nab) ?? "the shortcut"
+        return Text(
+            shortcuts.isActive(.nab)
+                ? "Press \(name) with a YouTube video in front, and it lands here."
+                : shortcuts.combo(for: .nab) == nil
+                    ? "Nab the tab from the list below, or set a shortcut in Settings."
+                    : "Nab the tab from the list below; \(name) is in use by another app."
         )
         .font(Typeface.meta)
         .foregroundStyle(Palette.inkTertiary)
@@ -527,7 +536,7 @@ struct LimeSpinner: View {
 /// One of the three equal buttons under the session: a label over its shortcut.
 private struct ActionTile: View {
     let label: String
-    var shortcut: String?
+    var combo: KeyCombo?
     var primary = false
     var enabled = true
     let action: () -> Void
@@ -537,10 +546,7 @@ private struct ActionTile: View {
         Button(action: action) {
             VStack(spacing: 3) {
                 Text(label).font(Typeface.button)
-                if let shortcut {
-                    Text(shortcut).font(Typeface.chip).opacity(primary ? 0.62 : 1)
-                        .foregroundStyle(primary ? Palette.onAccent : Palette.inkTertiary)
-                }
+                KeyCaps(combo, surface: primary ? .accent : .neutral)
             }
             .foregroundStyle(primary ? Palette.onAccent : Palette.ink)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -569,6 +575,7 @@ private struct ActionTile: View {
 private struct MenuRow: View {
     let label: String
     var trailing: String?
+    var combo: KeyCombo?
     var enabled = true
     let action: () -> Void
     @State private var hovering = false
@@ -581,6 +588,7 @@ private struct MenuRow: View {
                 if let trailing {
                     Text(trailing).font(Typeface.mono).foregroundStyle(Palette.inkTertiary)
                 }
+                KeyCaps(combo)
             }
             .padding(.horizontal, 10)
             .frame(height: PanelMetrics.menuRowHeight)
