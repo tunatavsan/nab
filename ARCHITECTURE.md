@@ -5,7 +5,7 @@ agent (`LSUIElement`): it lives in the menu bar and shows a Dock icon only while
 
 | Target | Depends on | Contents |
 | --- | --- | --- |
-| `NabCore` | Foundation, CryptoKit | `Capture` and its transcript, `SourceProvider` and `SourceRegistry`, `ContextPack`, `Conversation`, `Citation`, `LibraryStore`, `Gate`, and the pure logic behind the interface: `HomeLayout`, `LibrarySearch`, `TranscriptSearch`, `AskScope`, `ChatStamp`, `RackText` and `SessionGrouping`. |
+| `NabCore` | Foundation, CryptoKit | `Capture` and its transcript, `SourceProvider` and `SourceRegistry`, `ContextPack`, `Conversation`, `Citation`, `LibraryStore`, `Gate`, and the pure logic behind the interface: `HomeLayout`, `HomeGrid`, `LibrarySearch`, `TranscriptSearch`, `AskScope`, `ChatStamp`, `RackText` and `SessionGrouping`. |
 | `NabYouTube` | `NabCore` | `YouTubeSource`: link parsing, the player request, caption tracks, captions and chapters. |
 | `NabAI` | `NabCore` | `AISettings`, `ProviderKind`, `Keychain` and `AIClient`, which streams one assistant turn from any provider; `ModelNames`, `ModelChoices` and `ProviderInfo` (provider status and probe) feed the settings page. |
 | `NabApp` | all three | The app: `Capture/` (shortcut, browser bridge, `CaptureCenter`, `Assistant`), `UI/` (menu panel, rack, library and its pages, ask window, search palette, chat, settings) and `Design/` (tokens, motion, fonts, the reveal and the frame probe). |
@@ -72,7 +72,8 @@ see.
 ## Interface
 
 SwiftUI views live in AppKit windows and panels: the menu bar panel, the rack and the ask window are borderless
-`NSPanel`s, and the library is an `NSWindow` with a toolbar and one page at a time. Colors, type, radii and motion come
+`NSPanel`s, and the library is an `NSWindow` of one fixed size (1240 × 800 pt) that shows one page at a time under a
+toolbar that stays the same on every page; actions that belong to one page sit on that page. Colors, type, radii and motion come
 from `Sources/NabApp/Design`: `Tokens.swift` (palette, type, radii), `Motion.swift`, `Fonts.swift`, `Reveal.swift` and
 `FrameProbe.swift`. Views define no color, font or animation of their own, and keep only one-off layout numbers.
 Animations that loop or bounce stand still when Reduce Motion is on.
@@ -89,10 +90,11 @@ Animations that loop or bounce stand still when Reduce Motion is on.
 | Home: the open session, earlier sessions by day, their chats; `FirstRun.swift` while the library is empty | `Home.swift` |
 | Session: sources, thread, composer and the transcript drawer | `SessionPage.swift`, `Chat.swift`, `TranscriptDrawer.swift` |
 | Video: cover, chapters, transcript with find and a timeline | `VideoPage.swift` |
-| Settings: capture, the AI card, shortcuts | `SettingsView.swift`, `SettingsAICard.swift` |
+| Settings: AI, capture, shortcuts and prompts as grouped rows in one column | `SettingsView.swift`, `SettingsAICard.swift`, `SettingsRows.swift` |
 | ⌘K palette: videos, chats, transcript lines | `SearchPalette.swift` over `LibrarySearch` |
 
-`Home` is laid out by `HomeLayout`, find in a transcript by `TranscriptSearch`, and the text under a chat title by
+`Home` is grouped by `HomeLayout` and placed on a fixed column grid by `HomeGrid` (five columns for earlier days, four
+for the open session), find in a transcript by `TranscriptSearch`, and the text under a chat title by
 `ChatStamp`. Shared passage grouping lives in `TranscriptSupport.swift`.
 
 ### The ask window
@@ -111,7 +113,10 @@ itself: Esc closes, ⇥ switches scope, ⌘O opens the chat in the library, ⌘C
 
 ### Motion
 
-Panels open and close on Core Animation springs with a preferred frame rate of 120 Hz. Answers write themselves in with
+Panels open and close on Core Animation springs with a preferred frame rate of 120 Hz. Library pages swap with
+`AnyTransition.page`: the old page leaves at once and the new one fades in over 0.16 s, so two layouts never blend into
+each other; a chat's intro and its thread swap the same way. Thumbnails and covers are kept in memory, so a page that
+comes back draws them in its first frame. Answers write themselves in with
 `RevealRenderer`, a `TextRenderer` that draws each glyph sharpening out of a blur behind a moving edge. `RevealClock`
 moves that edge toward the text that has arrived, so a stream that comes in bursts reads as one motion. Selectable text
 on macOS skips custom renderers, so an answer becomes selectable once it has been fully drawn.
@@ -148,7 +153,7 @@ keychain:
 - **YouTube:** link shapes, chapters, captions, caption track choice, covers and links to a moment.
 - **Library and context pack:** passages, the registry, the pack's structure, text from a video that tries to close the
   pack's tags, timecodes, the store's files (including long chat ids and unreadable entries) and the `Gate`.
-- **Interface logic:** home grouping and filters, library search, find in a transcript, the ask scope, chat stamps,
+- **Interface logic:** home grouping, filters and grid placement, library search, find in a transcript, the ask scope, chat stamps,
   rack text and session grouping, all as plain values.
 - **Conversations and settings:** citations, failed turns, prompt language, model names and choices, what is stored and
   how old defaults migrate.
