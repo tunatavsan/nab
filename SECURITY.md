@@ -31,7 +31,23 @@ question. It has no account, no analytics and no server of its own. Your library
 `~/Library/Application Support/Nab`; API keys are kept in the macOS keychain.
 
 The Claude Code and Codex providers run the command shown in Settings in your login shell, as you. Treat that field
-like a line in your shell profile.
+like a line in your shell profile. To show whether they are set up, Nab runs `--version`, `claude auth status` and
+`codex login status`, reads only the state and the sign-in method from the answer, and never shows or logs the account.
+It never runs an install or sign-in command itself.
+
+## The player and the browser
+
+The mini player is a web view that loads YouTube's IFrame player for a video id Nab has checked
+(`[A-Za-z0-9_-]{11}`) and moves it with numbers built in Swift; no text from a page, a transcript or a model reaches its
+scripts. Its main frame and new windows may only go to YouTube and Google hosts; any other address opens in your
+browser. Messages from the page are read as player state, never as commands. The player keeps
+its cookies in the app's persistent web data store, so signing in to YouTube from the player's menu lasts; **Sign
+Out** removes the Google and YouTube records from that store. Nab never sees the password: Google's own page takes it.
+
+When videos play in the browser, Nab asks the browser over AppleScript for its tabs' addresses and looks for the one
+whose address carries the video's id. In that tab only, it sets the video's position with a line of JavaScript that
+contains nothing but a number, or, when the browser does not allow JavaScript from Apple Events, reloads that tab at
+the moment. It does not read page contents, and it does not touch other tabs.
 
 ## Supported versions
 

@@ -50,10 +50,12 @@ LM Studio.
 | **Transcript** | Details, chapters and captions in the video's original language, even when YouTube offers dubbed tracks, preferring a human-made track over automatic captions. |
 | **Context pack** | One block of text for any number of videos: tagged sources, an index, chapters, the description and the timecoded transcript. Copy it, or export it as Markdown. |
 | **Chat** | Summarize a video or a whole session, then keep asking. Answers stream in, cite timecodes and are saved with the video. |
+| **Player** | Click a timecode and the video plays from that moment: in its browser tab if it is already open there, otherwise on its page in the library, with the player on top. Pin the player to keep it floating above other apps; while it is pinned, timecodes play there. With **Play videos in** set to Browser, a new tab opens instead of the library. ⌘-click opens the transcript at the moment. |
 | **Library** | One window, four pages. **Home** lists the open session and earlier ones by day, with their chats. A **session page** holds the chat and, beside it, a transcript drawer that opens from a source card or a timecode. A **video page** shows chapters and the transcript, with find (⌘F) and a timeline. **Settings** is the fourth. ⌘[ and ⌘] go back and forward. |
 | **Search** | ⌘K searches video titles, chats and transcript lines, and jumps to the moment. |
 | **Ask window** | ⌃⌥S opens a floating glass window near the top of the screen without leaving your browser. It asks about the open session, or the latest video when the session is empty. Ask follow-ups there. Esc closes it, ⇥ switches between session and latest video, ⌘O opens the chat in the library and ⌘C copies the answer. |
-| **Menu bar** | The icon opens a panel with the session and its Copy all, Ask AI and New session buttons, plus paste, export, the library and Settings. The rack under the icon shows what a shortcut just did. |
+| **Menu bar** | The icon opens a panel with the session and its Copy all, Ask AI and New session buttons, plus paste, export, the library and Settings. Right-click it to switch to a monochrome icon, reopen the welcome or quit. The rack under the icon shows what a shortcut just did. |
+| **Welcome** | The first launch walks through the shortcuts, picking an AI and where videos play, inside the library window. |
 | **Command line** | `nab <links>` prints the same context pack, for scripts and agents. |
 
 ## Getting started
@@ -86,13 +88,16 @@ Open **Settings** (⌘,) in the library window and pick a provider:
 | Ollama, LM Studio | The local server running with a model loaded. Nothing leaves your Mac. |
 | OpenAI-compatible server | Its address, and a key if it needs one. |
 
-**Test** sends a one-word question so you know the setup works before you ask a real one.
+**Test** sends a one-word question so you know the setup works before you ask a real one. For Claude Code and Codex,
+Settings shows whether the command is installed and signed in, with the official command to copy when it is not, and
+an effort menu next to the model. The first summary you start without having picked a provider asks you to pick one,
+then runs.
 
 ### Permissions
 
 | Permission | Needed for |
 | --- | --- |
-| Automation (your browser) | Reading the address and title of the front tab when you press ⌃⌥N. macOS asks the first time. |
+| Automation (your browser) | Reading the address and title of the front tab when you press ⌃⌥N, and, when videos play in the browser, finding the video's tab and moving it to the moment. macOS asks the first time. |
 
 You can review it in **System Settings › Privacy & Security › Automation**.
 
@@ -118,7 +123,8 @@ no server of its own. Your library and chats are stored as JSON files in `~/Libr
 | ⇧⌘C | Copy the page's videos as a context pack. |
 | ⌘J | Ask AI about the current page. |
 
-Settings also has **New session after**: how many quiet minutes (1 to 60, five by default) end a session.
+**Settings › Shortcuts** records your own combination for any of the four global shortcuts. Settings also has **New
+session after**: how many quiet minutes (1 to 60, five by default) end a session.
 
 ## Command line and URLs
 

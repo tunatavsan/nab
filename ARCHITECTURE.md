@@ -59,15 +59,18 @@ see.
    - **OpenAI-compatible servers** (OpenAI, OpenRouter, Ollama, LM Studio, others): chat completions with
      server-sent events.
    - **Command-line tools** (Claude Code, Codex): the user's command runs in their login shell from an empty
-     temporary folder, the prompt goes in on standard input, and `$NAB_SYSTEM` and `$NAB_MODEL` carry the system
-     prompt and model. Claude Code's `stream-json` output is parsed for token deltas.
+     temporary folder, the prompt goes in on standard input, and `$NAB_SYSTEM`, `$NAB_MODEL` and `$NAB_EFFORT` carry
+     the system prompt, model and effort. `CLIPath` appends `~/.local/bin`, `/opt/homebrew/bin` and `/usr/local/bin`
+     to `PATH`, because an app opened from the Dock starts with the system path. Claude Code's `stream-json` output is
+     parsed for token deltas. `CLIStatus` reads `--version`, `claude auth status` and `codex login status` for the
+     setup guide in Settings; Nab never runs an install or sign-in command.
 3. Answers are written to the conversation about 30 times a second while they stream, and saved under
    `~/Library/Application Support/Nab/Chats` when the turn ends. A finished summary of a single video is also stored
    on its capture, so it travels with the video in copied context packs.
-4. `Citation.link` turns `[12:40]` and `[2 12:40]` in an answer into `nab-cite:` links. In a single-video chat, a click
-   opens the transcript drawer at the passage and lights it; otherwise it opens the video page at that second. While an answer
-   is being written its links reach the chat's `OpenURLAction`; once it is selectable, macOS sends them to the system,
-   which hands `nab-cite:` back to the app because Nab claims that scheme. Both paths end in `LibraryModel.open`.
+4. `Citation.link` turns `[12:40]` and `[2 12:40]` in an answer into `nab-cite:` links, and every timecode click in the
+   app, cited or not, goes to `PlaybackRouter.play(entryID:at:)` (see Playing a moment). ⌘-click opens the transcript
+   at that moment instead. Links in an answer reach the app's own `OpenURLAction` whether the text is streaming or
+   selectable; other links in an answer open only when they are `http` or `https`.
 
 ## Interface
 
@@ -78,16 +81,41 @@ from `Sources/NabApp/Design`: `Tokens.swift` (palette, type, radii), `Motion.swi
 `FrameProbe.swift`. Views define no color, font or animation of their own, and keep only one-off layout numbers.
 Animations that loop or bounce stand still when Reduce Motion is on.
 
+### Playing a moment
+
+`PlaybackRouter` (`Player/`) is the one entry point for playing a video at a second. It checks the YouTube id, then asks
+`PlaybackPlan` (pure, in `NabCore`) for the targets to try in order: the video's open browser tab first, whatever the
+setting; then the pinned player if it is open; then the library window, or a new tab when `player.target` is
+`browser`. A video YouTube will not embed goes to a new tab.
+
+- **Player** (`MiniPlayer.swift`, `PinPanel.swift`): one web view running YouTube's IFrame player, seeked with numbers
+  built in Swift. It sits above the video page in the library; **Pin** moves the same web view into a floating panel
+  that keeps 16:9 when resized and remembers its frame, and **Unpin** brings it back. Main-frame and new-window
+  navigation is limited to YouTube and Google hosts; anything else opens in the browser. The web view uses the
+  persistent website data store, so a sign-in made from the player's menu lasts until **Sign Out**.
+- **Browser** (`BrowserSeek.swift`, on `BrowserBridge`'s queue): `BrowserSeekScript` builds the AppleScript from a
+  checked id and a whole number of seconds. It finds the tab whose address carries that id, sets the video's position
+  with JavaScript, or reloads that same tab at `t=` when JavaScript from Apple Events is off, and opens a new tab only
+  when there is none.
+
+### Shortcuts
+
+`ShortcutMap` and `KeyCombo` (`NabCore/Shortcuts.swift`) hold the four global shortcuts as Carbon key codes and
+modifiers, with the defaults ⌃⌥N, ⌃⌥A, ⌃⌥S and ⌃⌥X when nothing is stored, and check a new combination before it is
+saved. `ShortcutStore` keeps them under the `shortcuts` key, registers them with `RegisterEventHotKey` and re-registers
+on every change. Every place that shows a shortcut draws it with `KeyCaps`.
+
 ### Library routing
 
-`LibraryModel` (in `UI/Library.swift`) owns what the window shows. `Route` is `home`, `session([ids])`, `video(id)` or
-`settings`. `go(_:)` pushes the current route on `backStack` and clears `forwardStack`; `goBack` and `goForward` (⌘[,
+`LibraryModel` (in `UI/Library.swift`) owns what the window shows. `Route` is `home`, `session([ids])`, `video(id)`,
+`settings` or `welcome`. `go(_:)` pushes the current route on `backStack` and clears `forwardStack`; `goBack` and `goForward` (⌘[,
 ⌘]) walk them. `searchQuery` is the ⌘K palette's text, nil while it is closed. `focus` carries a transcript moment
 (entry id and seconds, with a token so a repeated click scrolls again) that a page scrolls to and lights.
 
 | Page | File |
 | --- | --- |
 | Home: the open session, earlier sessions by day, their chats; `FirstRun.swift` while the library is empty | `Home.swift` |
+| Welcome: four steps on first launch, again from the menu bar icon's right-click menu | `Onboarding.swift` |
 | Session: sources, thread, composer and the transcript drawer | `SessionPage.swift`, `Chat.swift`, `TranscriptDrawer.swift` |
 | Video: cover, chapters, transcript with find and a timeline | `VideoPage.swift` |
 | Settings: AI, capture, shortcuts and prompts as grouped rows in one column | `SettingsView.swift`, `SettingsAICard.swift`, `SettingsRows.swift` |
@@ -109,11 +137,13 @@ sent until the user presses Summarize or Return (`nab://ask?q=` only pre-fills t
 A non-activating panel never makes Nab the active app, so the browser keeps its tab, but the main menu's Edit shortcuts
 do not reach the text field either. The controller installs a local `keyDown` monitor for the panel and routes keys
 itself: Esc closes, ⇥ switches scope, ⌘O opens the chat in the library, ⌘C copies a selection or else the answer, and
-⌘V, ⌘X, ⌘A and ⌘Z go to the field. A mouse click outside the panel (global and local monitors) closes it.
+⌘V, ⌘X, ⌘A and ⌘Z go to the field. A mouse click outside the panel (global and local monitors) closes it, except a
+click in the mini player; following a timecode leaves it open.
 
 ### Motion
 
-Panels open and close on Core Animation springs with a preferred frame rate of 120 Hz. Library pages swap with
+`Motion.swift` opens with a table of every kind of motion (windows, pages, content, lists, drawers, hover, press) and
+the one token and transition each uses. Panels open and close on Core Animation springs with a preferred frame rate of 120 Hz. Library pages swap with
 `AnyTransition.page`: the old page leaves at once and the new one fades in over 0.16 s, so two layouts never blend into
 each other; a chat's intro and its thread swap the same way. Thumbnails and covers are kept in memory, so a page that
 comes back draws them in its first frame. Answers write themselves in with
@@ -122,7 +152,8 @@ moves that edge toward the text that has arrived, so a stream that comes in burs
 on macOS skips custom renderers, so an answer becomes selectable once it has been fully drawn.
 
 Set `NAB_FRAME_PROBE=1` to log how many display refreshes each animation actually drew to
-`~/Library/Logs/Nab/frames.log`. `NAB_DATA_DIR` moves the data folder, and `NAB_OPEN='nab://…'` handles a URL at launch (debug builds only).
+`~/Library/Logs/Nab/frames.log`. `NAB_PLAYER_PROBE=1` logs where the mini player is against where it was sent.
+`NAB_DATA_DIR` moves the data folder, and `NAB_OPEN='nab://…'` handles a URL at launch (debug builds only).
 
 ## Adding a source
 
