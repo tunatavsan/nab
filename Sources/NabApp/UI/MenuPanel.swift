@@ -34,7 +34,8 @@ final class StatusController {
         item.button?.action = #selector(toggle)
         installLight()
         panel = FloatingPanel(
-            size: NSSize(width: PanelMetrics.width, height: PanelMetrics.height(rows: 0, earlier: false))
+            size: NSSize(width: PanelMetrics.width, height: PanelMetrics.height(rows: 0, earlier: false)),
+            cornerRadius: Radius.ring
         ) {
             MenuPanelView(
                 center: center,

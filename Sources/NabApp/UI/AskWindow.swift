@@ -57,7 +57,7 @@ final class AskWindowController {
         self.openLibrary = openLibrary
         self.openVideo = openVideo
         let model = model
-        panel = FloatingPanel(size: NSSize(width: AskMetrics.width, height: 360)) {
+        panel = FloatingPanel(size: NSSize(width: AskMetrics.width, height: 360), cornerRadius: Radius.ring) {
             AskView(model: model, assistant: assistant, center: center)
         }
         model.cite = { [weak self] in self?.open($0) }

@@ -6,6 +6,7 @@ import SwiftUI
 /// and a place in ⌘Tab, and gives them back when the window closes.
 @MainActor
 final class LibraryWindowController: NSObject, NSWindowDelegate {
+    static let windowID = NSUserInterfaceItemIdentifier("NabLibrary")
     private let window: NSWindow
     private let model: LibraryModel
 
@@ -26,6 +27,7 @@ final class LibraryWindowController: NSObject, NSWindowDelegate {
         window.contentMinSize = NSSize(width: 960, height: 600)
         window.isReleasedWhenClosed = false
         window.setFrameAutosaveName("NabLibrary")
+        window.identifier = Self.windowID
         window.delegate = self
         if !window.setFrameUsingName("NabLibrary") { window.center() }
     }

@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 import NabCore
 import SwiftUI
 
@@ -37,6 +38,7 @@ struct SearchPalette: View {
     /// Found for `resultsQuery`; a search runs off the main thread once typing pauses.
     @State private var results = SearchResults()
     @State private var resultsQuery: String?
+    @State private var escapeMonitor: Any?
 
     private var query: String { model.searchQuery ?? "" }
     private var center: CaptureCenter { model.center }
@@ -120,7 +122,9 @@ struct SearchPalette: View {
         .onAppear {
             focused = true
             refreshClipboard()
+            installEscape()
         }
+        .onDisappear(perform: removeEscape)
         .task(id: searchKey) { await search() }
         .onChange(of: query) { selection = 0 }
         .onChange(of: results) { selection = 0 }
@@ -135,7 +139,9 @@ struct SearchPalette: View {
                 .foregroundStyle(Palette.inkSecondary)
             TextField(
                 "Search videos, chats and transcripts",
-                text: Binding(get: { query }, set: { model.searchQuery = $0 })
+                // Once closed, the field still writes its last text back as it ends editing; that write would
+                // reopen the palette, so it is dropped.
+                text: Binding(get: { query }, set: { if model.searchQuery != nil { model.searchQuery = $0 } })
             )
             .textFieldStyle(.plain)
             .font(DMSans.font(18))
@@ -292,6 +298,24 @@ struct SearchPalette: View {
         model.copyContext(of: ids)
         model.searchQuery = nil
         return true
+    }
+
+    /// An empty search field keeps Esc to itself, so neither `onExitCommand` nor `onKeyPress` sees it; the palette
+    /// closes on Esc from a monitor that runs before the field.
+    private func installEscape() {
+        removeEscape()
+        escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            guard Int(event.keyCode) == kVK_Escape, event.window?.identifier == LibraryWindowController.windowID else {
+                return event
+            }
+            MainActor.assumeIsolated { model.searchQuery = nil }
+            return nil
+        }
+    }
+
+    private func removeEscape() {
+        if let escapeMonitor { NSEvent.removeMonitor(escapeMonitor) }
+        escapeMonitor = nil
     }
 
     private func refreshClipboard() {

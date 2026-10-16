@@ -8,10 +8,21 @@ final class FloatingPanel: NSPanel {
     private let host: NSView
     private var motionToken = 0
 
-    init<Content: View>(size: NSSize, level: NSWindow.Level = .popUpMenu, @ViewBuilder content: () -> Content) {
+    /// `cornerRadius` is the radius of a glass ring that fills the whole panel. Glass leaves a faint fill over the
+    /// entire window and the system shadow is cut from it, so without the clip a square shadow shows behind the
+    /// rounded glass (screenshots of the window alone do not show it).
+    init<Content: View>(
+        size: NSSize, level: NSWindow.Level = .popUpMenu, cornerRadius: CGFloat? = nil,
+        @ViewBuilder content: () -> Content
+    ) {
         let hosting = NSHostingView(rootView: content())
         hosting.sizingOptions = []
         hosting.wantsLayer = true
+        if let cornerRadius, let layer = hosting.layer {
+            layer.cornerRadius = cornerRadius
+            layer.cornerCurve = .continuous
+            layer.masksToBounds = true
+        }
         host = hosting
         super.init(
             contentRect: NSRect(origin: .zero, size: size),
@@ -99,8 +110,14 @@ final class FloatingPanel: NSPanel {
         fade.toValue = 1
         fade.duration = 0.14
         fade.preferredFrameRateRange = WindowMotion.frameRate
+        // The shadow taken when the panel came on screen saw it collapsed and transparent; take it again at rest.
+        CATransaction.begin()
+        CATransaction.setCompletionBlock { [weak self] in
+            MainActor.assumeIsolated { self?.invalidateShadow() }
+        }
         layer.add(spring, forKey: "nab.open.transform")
         layer.add(fade, forKey: "nab.open.opacity")
+        CATransaction.commit()
     }
 
     func dismiss(
