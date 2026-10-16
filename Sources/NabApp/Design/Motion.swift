@@ -5,6 +5,29 @@ import SwiftUI
 // Windows (the panel, the toast) open and close with Core Animation springs, which run in the render
 // server without waiting on the main thread. Content inside moves with SwiftUI springs, which keep
 // their velocity when interrupted.
+//
+// Every animation belongs to one class, and a class has one token and one transition. A new animation
+// picks its class here instead of a curve of its own.
+//
+// | Class                          | Token                      | Transition              |
+// | ------------------------------ | -------------------------- | ----------------------- |
+// | Floating window in and out     | WindowMotion               | scale and drop, fade    |
+// | Toast and rack                 | WindowMotion               | scale and drop, fade    |
+// | Mini player in and out         | WindowMotion               | scale and drop, fade    |
+// | Library window in and out      | system                     | system                  |
+// | Menu and popover               | system (NSMenu, Menu)      | system                  |
+// | Page change                    | Motion.pageIn              | .page                   |
+// | Content change                 | Motion.settle              | .opacity, .rackCard     |
+// | List insert and remove         | Motion.settle              | .rise                   |
+// | Drawer in and out              | Motion.settle              | .drawer                 |
+// | Floating window resize         | Motion.settle              | frame                   |
+// | State flip (toggle, blur, tab) | Motion.snap                | none                    |
+// | Hover highlight                | Motion.snap                | none                    |
+// | Hover lift (tiles)             | Motion.lift                | none                    |
+// | Press                          | Motion.press               | PressableStyle          |
+//
+// With Reduce Motion on, every SwiftUI class goes through `Motion.resolved` (a short fade) and the window
+// classes stand still.
 
 enum Motion {
     /// Hover lifts on tiles and icons: quick, with a slight overshoot.
@@ -33,6 +56,12 @@ extension AnyTransition {
     static var page: AnyTransition {
         .asymmetric(insertion: .opacity.animation(Motion.pageIn), removal: .identity)
     }
+
+    /// A side drawer sliding in from the trailing edge.
+    static var drawer: AnyTransition { .move(edge: .trailing).combined(with: .opacity) }
+
+    /// A card swapping for the next one in place, as the rack does.
+    static var rackCard: AnyTransition { .opacity.combined(with: .scale(scale: 0.97, anchor: .top)) }
 
     static var rise: AnyTransition {
         .asymmetric(

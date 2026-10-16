@@ -10,6 +10,10 @@ struct SessionPage: View {
     @State private var drawerID: String?
     /// The citation that opened the drawer; nil when a source card did.
     @State private var drawerFocus: LibraryModel.Focus?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// The drawer's motion, a short fade with Reduce Motion on.
+    private var drawerMotion: Animation { Motion.resolved(Motion.settle, reduceMotion: reduceMotion) }
 
     /// Videos in the order the chat numbers them.
     private var orderedIDs: [String] { model.assistant.conversation(ids)?.entryIDs ?? ids }
@@ -24,7 +28,7 @@ struct SessionPage: View {
             VStack(spacing: 0) {
                 SourcesStrip(entries: entries, numbered: numbered, selected: drawerID, copy: model.copyContext) {
                     entry in
-                    withAnimation(Motion.settle) {
+                    withAnimation(drawerMotion) {
                         drawerID = entry.id
                         drawerFocus = nil
                     }
@@ -38,13 +42,13 @@ struct SessionPage: View {
                     focus: drawerFocus, onClose: closeDrawer
                 )
                 .id(drawerID)
-                .transition(.move(edge: .trailing).combined(with: .opacity))
+                .transition(.drawer)
             }
         }
         .clipShape(.rect)
         .onChange(of: model.focus, initial: true) { _, focus in
             guard let focus, orderedIDs.contains(focus.entryID) else { return }
-            withAnimation(Motion.settle) {
+            withAnimation(drawerMotion) {
                 drawerID = focus.entryID
                 drawerFocus = focus
             }
@@ -61,7 +65,7 @@ struct SessionPage: View {
     }
 
     private func closeDrawer() {
-        withAnimation(Motion.settle) {
+        withAnimation(drawerMotion) {
             drawerID = nil
             drawerFocus = nil
         }

@@ -141,7 +141,7 @@ private struct RackView: View {
             if let toast {
                 content(card, toast: toast, session: session)
                     .id(card.kind)
-                    .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.97, anchor: .top)))
+                    .transition(reduceMotion ? .opacity : .rackCard)
             }
         }
         .padding(RackMetrics.inset)
