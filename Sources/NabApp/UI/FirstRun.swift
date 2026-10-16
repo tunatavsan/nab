@@ -73,23 +73,27 @@ struct FirstRunView: View {
 
     private var steps: some View {
         HStack(alignment: .top, spacing: Space.m) {
+            let shortcuts = ShortcutStore.shared
             if center.shortcutAvailable {
                 step(
-                    ["⌃", "⌥", "N"], "Nab the tab you’re watching",
+                    KeyCaps(shortcuts.combo(for: .nab)), "Nab the tab you’re watching",
                     "Works from any app while a YouTube tab is in front.")
             } else {
                 step(
-                    ["⌃", "⌥", "N"], "⌃⌥N is in use by another app",
+                    KeyCaps(shortcuts.combo(for: .nab)),
+                    "\(shortcuts.text(for: .nab) ?? "The shortcut") is in use by another app",
                     "Use Front Tab in the menu bar panel to nab the tab you’re watching.")
             }
-            step(["⌘", "V"], "Paste into any AI", "Claude, ChatGPT, a notes app. Nab already copied it.")
-            step(["⌃", "⌥", "S"], "Or ask right here", "A floating window answers about everything in the session.")
+            step(KeycapRow(["⌘", "V"]), "Paste into any AI", "Claude, ChatGPT, a notes app. Nab already copied it.")
+            step(
+                KeyCaps(shortcuts.combo(for: .summarize)), "Or ask right here",
+                "A floating window answers about everything in the session.")
         }
     }
 
-    private func step(_ keys: [String], _ title: String, _ text: String) -> some View {
+    private func step(_ keys: some View, _ title: String, _ text: String) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            KeycapRow(keys)
+            keys
             Text(title).font(Typeface.cardTitle).foregroundStyle(Palette.ink)
             Text(text).font(Typeface.meta).lineSpacing(3).foregroundStyle(Palette.inkTertiary)
             Spacer(minLength: 0)
@@ -136,7 +140,7 @@ struct FirstRunView: View {
 }
 
 /// The Nab mark on a dark tile.
-private struct AppMark: View {
+struct AppMark: View {
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 22, style: .continuous).fill(

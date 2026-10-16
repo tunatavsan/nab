@@ -10,12 +10,17 @@ struct HomePage: View {
     @State private var filter = HomeFilter.all
     @State private var width: CGFloat = 1100
     @State private var clipboardID: String?
+    @AppStorage("onboarding.version") private var onboardingSeen = 0
 
     private var center: CaptureCenter { model.center }
 
     var body: some View {
         if center.entries.isEmpty {
-            FirstRunView(model: model)
+            if Onboarding.opensAutomatically(libraryIsEmpty: true, seenVersion: onboardingSeen) {
+                OnboardingView(model: model)
+            } else {
+                FirstRunView(model: model)
+            }
         } else {
             let layout = HomeLayout.build(
                 entries: center.entries, previews: model.assistant.previews(entries: center.entries),

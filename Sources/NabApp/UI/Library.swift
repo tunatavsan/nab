@@ -75,6 +75,11 @@ final class LibraryWindowController: NSObject, NSWindowDelegate {
         bringForward()
     }
 
+    func showWelcome() {
+        model.go(.welcome)
+        bringForward()
+    }
+
     /// Opens the chat page of the capture session that is open now, or the home page when there is none.
     func showCurrentSession() {
         let ids = model.currentSessionIDs()
@@ -120,9 +125,12 @@ final class LibraryModel {
         case session([String])
         case video(String)
         case settings
+        case welcome
     }
 
     private(set) var route = Route.home
+    /// The welcome's current step, kept here so a trip to Settings and back lands on the same step.
+    var welcomeStep = 0
     private(set) var backStack: [Route] = []
     private(set) var forwardStack: [Route] = []
     /// The ⌘K palette's text; nil while the palette is closed.
@@ -169,7 +177,7 @@ final class LibraryModel {
         switch route {
         case .session(let ids): ids
         case .video(let id): [id]
-        case .home, .settings: []
+        case .home, .settings, .welcome: []
         }
     }
 
@@ -185,7 +193,7 @@ final class LibraryModel {
         let inPage: Bool
         switch route {
         case .session, .video: inPage = !NSEvent.modifierFlags.contains(.command)
-        case .home, .settings: inPage = false
+        case .home, .settings, .welcome: inPage = false
         }
         if inPage {
             jump(to: videos[index].id, at: citation.seconds)
@@ -283,6 +291,7 @@ final class LibraryModel {
             Set(ids) == Set(center.session.filter { $0.capture != nil }.map(\.id)) ? "This session" : "Chat"
         case .video(let id): center.entry(id)?.title ?? "Video"
         case .settings: "Settings"
+        case .welcome: "Welcome"
         }
     }
 }
@@ -366,6 +375,8 @@ struct LibraryView: View {
                 assistant: model.assistant, shortcutAvailable: model.center.shortcutAvailable
             )
             .transition(.page)
+        case .welcome:
+            OnboardingView(model: model).transition(.page)
         }
     }
 

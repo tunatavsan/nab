@@ -19,6 +19,7 @@ struct SettingsView: View {
                     .accessibilityAddTraits(.isHeader)
                 SettingsAICard(assistant: assistant)
                 SettingsCaptureSection()
+                SettingsGeneralSection()
                 SettingsShortcutsSection()
                 SettingsPromptsSection(assistant: assistant)
             }

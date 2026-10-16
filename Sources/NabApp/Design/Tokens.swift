@@ -185,9 +185,9 @@ enum PanelMetrics {
         cellPadding * 2 + headerHeight + headerGap + listHeight(rows: rows)
     }
 
-    /// Menu rows: front tab, paste, export, the optional "earlier today", then the divider and three more.
+    /// Menu rows: front tab, paste, export, the optional "earlier today", then the divider and two more.
     static func menuHeight(earlier: Bool) -> CGFloat {
-        menuPadding * 2 + CGFloat(earlier ? 7 : 6) * menuRowHeight + ruleHeight
+        menuPadding * 2 + CGFloat(earlier ? 6 : 5) * menuRowHeight + ruleHeight
     }
 
     static func height(rows: Int, earlier: Bool) -> CGFloat {

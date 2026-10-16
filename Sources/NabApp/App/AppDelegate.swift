@@ -33,7 +33,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 summarize: { [weak self] ids in self?.summarize(ids) },
                 openSettings: { [weak self] in self?.showSettings() },
                 copyAll: { [weak self] in self?.center.copySession() },
-                newSession: { [weak self] in self?.center.closeSession(announce: true) }))
+                newSession: { [weak self] in self?.center.closeSession(announce: true) },
+                openWelcome: { [weak self] in
+                    self?.askWindow.close()
+                    self?.libraryWindow().showWelcome()
+                }))
         assistant.openSettings = { [weak self] in self?.showSettings() }
         rack = RackController(
             center: center, anchor: { [weak self] in self?.status.anchorRect },

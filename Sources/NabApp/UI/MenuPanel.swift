@@ -16,6 +16,8 @@ final class StatusController {
         let openSettings: () -> Void
         let copyAll: () -> Void
         let newSession: () -> Void
+        /// The right-click menu's "Welcome…"; the panel itself never shows it.
+        var openWelcome: () -> Void = {}
     }
 
     private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -25,13 +27,19 @@ final class StatusController {
     private let light = CAShapeLayer()
     private var lastInFlight = 0
     private var iconWidth = Glyph.width
+    private let actions: Actions
+    private var appliedStyle = StatusController.iconStyle
 
     init(center: CaptureCenter, actions: Actions) {
         self.center = center
+        self.actions = actions
         item.button?.image = Self.makeIcon(count: 0, fetching: false)
         item.button?.setAccessibilityLabel("Nab")
         item.button?.target = self
-        item.button?.action = #selector(toggle)
+        item.button?.action = #selector(clicked)
+        item.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(defaultsChanged), name: UserDefaults.didChangeNotification, object: nil)
         installLight()
         panel = FloatingPanel(
             size: NSSize(width: PanelMetrics.width, height: PanelMetrics.height(rows: 0, earlier: false)),
@@ -93,8 +101,63 @@ final class StatusController {
         return window.convertToScreen(button.convert(button.bounds, to: nil))
     }
 
-    @objc private func toggle() {
-        isShown ? close() : open()
+    /// Left click toggles the panel; right click and ⌃-click open the menu.
+    @objc private func clicked() {
+        let event = NSApp.currentEvent
+        if event?.type == .rightMouseUp || event?.modifierFlags.contains(.control) == true {
+            showMenu()
+        } else {
+            isShown ? close() : open()
+        }
+    }
+
+    private func showMenu() {
+        close()
+        guard let button = item.button else { return }
+        let style = Self.iconStyle
+        let menu = NSMenu()
+        for (title, value) in [("Icon Color", MenuBarIconStyle.color), ("Monochrome Icon", .mono)] {
+            let entry = NSMenuItem(title: title, action: #selector(pickStyle(_:)), keyEquivalent: "")
+            entry.target = self
+            entry.representedObject = value.rawValue
+            entry.state = style == value ? .on : .off
+            menu.addItem(entry)
+        }
+        menu.addItem(.separator())
+        for (title, selector) in [("Settings…", #selector(openSettingsItem)), ("Welcome…", #selector(openWelcomeItem))]
+        {
+            let entry = NSMenuItem(title: title, action: selector, keyEquivalent: "")
+            entry.target = self
+            menu.addItem(entry)
+        }
+        menu.addItem(.separator())
+        let quit = NSMenuItem(title: "Quit Nab", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        quit.target = NSApp
+        menu.addItem(quit)
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.height + 5), in: button)
+    }
+
+    @objc private func pickStyle(_ sender: NSMenuItem) {
+        UserDefaults.standard.set(sender.representedObject as? String, forKey: Self.styleKey)
+    }
+
+    @objc private func openSettingsItem() { actions.openSettings() }
+    @objc private func openWelcomeItem() { actions.openWelcome() }
+
+    // MARK: Icon style
+
+    static let styleKey = "menubar.iconStyle"
+    private static var iconStyle: MenuBarIconStyle {
+        MenuBarIconStyle(stored: UserDefaults.standard.string(forKey: styleKey))
+    }
+
+    /// Redraws the icon the moment the style changes, from the menu or from Settings.
+    @objc private func defaultsChanged() {
+        let style = Self.iconStyle
+        guard style != appliedStyle else { return }
+        appliedStyle = style
+        updateBadge(count: center.session.count, fetching: center.inFlight > 0)
+        light.fillColor = lightColor(fetching: center.inFlight > 0)
     }
 
     /// A panel on its way out counts as closed, so the next click or `nab://menu` opens it again.
@@ -177,10 +240,11 @@ final class StatusController {
         dark ? Palette.nsAccent : NSColor(srgbRed: 0x4B / 255, green: 0x7A / 255, blue: 0x0E / 255, alpha: 1)
     }
 
-    /// The icon, with the session's video count drawn to its right when there is one. Not a template: the
-    /// handler resolves colors for whichever menu bar it is drawn on. While fetching, the left quote is left
+    /// The icon, with the session's video count drawn to its right when there is one. Colored, it is not a
+    /// template: the handler resolves colors for whichever menu bar it is drawn on. Mono is a template. While fetching, the left quote is left
     /// out because the breathing light layer draws it.
     private static func makeIcon(count: Int, fetching: Bool) -> NSImage {
+        let mono = iconStyle == .mono
         let digits = NSAttributedString(
             string: "\(count)",
             attributes: [.font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold)])
@@ -191,21 +255,23 @@ final class StatusController {
             guard let context = NSGraphicsContext.current?.cgContext else { return false }
             if !fetching {
                 context.addPath(Glyph.quote(side: 0))
-                context.setFillColor(markLime(dark: dark).cgColor)
+                context.setFillColor((mono ? NSColor.black : markLime(dark: dark)).cgColor)
                 context.fillPath()
             }
             context.addPath(Glyph.quote(side: 1))
-            context.setFillColor(NSColor.labelColor.cgColor)
+            context.setFillColor((mono ? NSColor.black : NSColor.labelColor).cgColor)
             context.fillPath()
             if count > 0 {
                 let ink = NSMutableAttributedString(attributedString: digits)
                 ink.addAttribute(
-                    .foregroundColor, value: NSColor.labelColor, range: NSRange(location: 0, length: ink.length))
+                    .foregroundColor, value: mono ? NSColor.black : NSColor.labelColor,
+                    range: NSRange(location: 0, length: ink.length))
                 ink.draw(at: NSPoint(x: Glyph.width + 4, y: (Glyph.height - ink.size().height) / 2))
             }
             return true
         }
-        image.isTemplate = false
+        // Mono is a template: the menu bar tints it white on a dark bar and black on a light one.
+        image.isTemplate = mono
         return image
     }
 
@@ -245,10 +311,11 @@ final class StatusController {
 
     private func lightColor(fetching: Bool) -> CGColor {
         var color = Palette.nsAccent.cgColor
+        let mono = Self.iconStyle == .mono
         let appearance = item.button?.effectiveAppearance ?? NSApp.effectiveAppearance
         appearance.performAsCurrentDrawingAppearance {
             let dark = NSAppearance.currentDrawing().bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-            color = (fetching ? Self.markLime(dark: dark) : NSColor.labelColor).cgColor
+            color = (fetching && !mono ? Self.markLime(dark: dark) : NSColor.labelColor).cgColor
         }
         return color
     }
@@ -351,7 +418,6 @@ private struct MenuPanelView: View {
             Rectangle().fill(Palette.line).frame(height: 1).padding(.horizontal, Space.s).padding(.vertical, 4)
             MenuRow(label: "Open Library") { actions.openLibrary(nil) }
             MenuRow(label: "Settings…", trailing: "⌘,", action: actions.openSettings)
-            MenuRow(label: "Quit Nab", trailing: "⌘Q") { NSApp.terminate(nil) }
         }
         .padding(.vertical, PanelMetrics.menuPadding)
     }
