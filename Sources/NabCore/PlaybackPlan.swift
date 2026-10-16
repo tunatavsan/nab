@@ -20,12 +20,14 @@ public enum YouTubeID {
 
 /// Where a click on a timecode may go, in the order the router tries them.
 public enum PlaybackTarget: Hashable, Sendable {
-    /// Nab's own small player.
-    case mini
     /// The matching browser tab: set the playback position with a script.
     case tabScript
     /// The matching browser tab: change its address to the moment (needs no "JavaScript from Apple Events").
     case tabAddress
+    /// The pinned floating player.
+    case pin
+    /// The library's video page, with the player embedded above it.
+    case mainWindow
     /// A new browser tab; the last resort.
     case newTab
 }
@@ -37,17 +39,25 @@ public enum PlaybackPlan {
         public init(stored: String?) { self = stored.flatMap(Self.init(rawValue:)) ?? .nab }
     }
 
+    /// The order: an open tab of the video first, whatever the setting; then the pin if one is open; then the
+    /// library window, or a new tab when the setting says browser. A video YouTube will not embed goes to a new tab.
     /// `tabMatch` and `jsAllowed` are nil while unknown; the router learns them from the first browser attempt
     /// and asks again.
     public static func targets(
-        setting: Setting, embedFailed: Bool, tabMatch: Bool? = nil, jsAllowed: Bool? = nil
+        setting: Setting, pinOpen: Bool, embedFailed: Bool, tabMatch: Bool? = nil, jsAllowed: Bool? = nil
     ) -> [PlaybackTarget] {
-        var browser: [PlaybackTarget] = []
+        var plan: [PlaybackTarget] = []
         if tabMatch != false {
-            if jsAllowed != false { browser.append(.tabScript) }
-            browser.append(.tabAddress)
+            if jsAllowed != false { plan.append(.tabScript) }
+            plan.append(.tabAddress)
         }
-        browser.append(.newTab)
-        return setting == .nab && !embedFailed ? [.mini] + browser : browser
+        if embedFailed {
+            plan.append(.newTab)
+        } else if pinOpen {
+            plan.append(.pin)
+        } else {
+            plan.append(setting == .browser ? .newTab : .mainWindow)
+        }
+        return plan
     }
 }

@@ -40,6 +40,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }))
         assistant.openSettings = { [weak self] in self?.showSettings() }
         PlaybackRouter.shared.title = { [weak self] id in self?.center.entry(id)?.title }
+        PlaybackRouter.shared.showInLibrary = { [weak self] id, seconds in
+            self?.libraryWindow().showVideo(id, at: seconds)
+        }
         rack = RackController(
             center: center, anchor: { [weak self] in self?.status.anchorRect },
             openLibrary: { [weak self] id in self?.showLibrary(select: id) },

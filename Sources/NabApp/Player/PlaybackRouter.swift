@@ -17,9 +17,17 @@ final class PlaybackRouter {
         PlaybackPlan.Setting(stored: UserDefaults.standard.string(forKey: Self.defaultsKey))
     }
 
+    /// Opens a video's page in the library window, scrolled to a moment; the app delegate sets it.
+    var showInLibrary: (_ entryID: String, _ seconds: TimeInterval) -> Void = { _, _ in }
+
+    /// Simulations (`NAB_PLAYER_PROBE=1`) never reach real browsers: no tab is looked for, a new tab is only logged.
+    private static let simulation = ProcessInfo.processInfo.environment["NAB_PLAYER_PROBE"] == "1"
+
     func play(entryID: String, at seconds: TimeInterval) {
         guard let id = YouTubeID.id(fromEntryID: entryID) else { return }
-        attempt(entryID: entryID, id: id, seconds: seconds.wholeSeconds, embedFailed: false, tab: nil, script: nil)
+        attempt(
+            entryID: entryID, id: id, seconds: seconds.wholeSeconds, embedFailed: false,
+            tab: Self.simulation ? false : nil, script: nil)
     }
 
     /// Opens the whole video in the browser; a tab that already has it is brought forward instead.
@@ -30,23 +38,32 @@ final class PlaybackRouter {
 
     func openInBrowser(videoID id: String) {
         guard YouTubeID.isValid(id) else { return }
+        if Self.simulation { return log("browser open suppressed") }
         Task {
             if await BrowserSeek.run(videoID: id, action: .raise) != .done { Self.openNewTab(id, seconds: nil) }
         }
     }
 
+    private func log(_ text: String) { FileHandle.standardError.write(Data("[player] \(text)\n".utf8)) }
+
     private func attempt(entryID: String, id: String, seconds: Int, embedFailed: Bool, tab: Bool?, script: Bool?) {
-        let targets = PlaybackPlan.targets(setting: setting, embedFailed: embedFailed, tabMatch: tab, jsAllowed: script)
+        let targets = PlaybackPlan.targets(
+            setting: setting, pinOpen: MiniPlayer.shared.isPinned, embedFailed: embedFailed, tabMatch: tab,
+            jsAllowed: script)
         guard let target = targets.first else { return }
         func next(embedFailed: Bool = embedFailed, tab: Bool? = tab, script: Bool? = script) {
             attempt(entryID: entryID, id: id, seconds: seconds, embedFailed: embedFailed, tab: tab, script: script)
         }
+        let fallBack: (String) -> Void = { [weak self] _ in
+            PlayerNotice.show("This video can't play inside Nab — opened in your browser.")
+            self?.attempt(entryID: entryID, id: id, seconds: seconds, embedFailed: true, tab: false, script: nil)
+        }
         switch target {
-        case .mini:
-            MiniPlayer.shared.play(videoID: id, title: title(entryID), at: TimeInterval(seconds)) { [weak self] _ in
-                PlayerNotice.show("This video can't play inside Nab — opened in your browser.")
-                self?.attempt(entryID: entryID, id: id, seconds: seconds, embedFailed: true, tab: nil, script: nil)
-            }
+        case .pin:
+            MiniPlayer.shared.playPinned(videoID: id, at: TimeInterval(seconds), onEmbedFailure: fallBack)
+        case .mainWindow:
+            MiniPlayer.shared.playEmbedded(videoID: id, at: TimeInterval(seconds), onEmbedFailure: fallBack)
+            showInLibrary(entryID, TimeInterval(seconds))
         case .tabScript:
             Task {
                 switch await BrowserSeek.run(videoID: id, action: .script(seconds: seconds)) {
@@ -63,6 +80,7 @@ final class PlaybackRouter {
                 }
             }
         case .newTab:
+            if Self.simulation { return log("new tab suppressed") }
             Self.openNewTab(id, seconds: seconds)
         }
     }

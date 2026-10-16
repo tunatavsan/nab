@@ -1,62 +1,113 @@
 import AppKit
-import Carbon.HIToolbox
 import NabCore
 import SwiftUI
 import WebKit
 
-/// Nab's own small player: one floating panel with YouTube's IFrame Player API inside. YouTube's rules hold here:
-/// nothing is drawn over the video, ads are not blocked, and the video area is never smaller than 200×200 px.
+/// Nab's player: one YouTube IFrame Player API page in one web view, which lives either embedded above a video's
+/// page in the library window or in the pin, a floating panel. Pinning carries the same web view across, so playback
+/// does not stop. YouTube's rules hold: nothing is drawn over the video, ads are not blocked, and the video area is
+/// never smaller than 200×200 px.
 @MainActor
+@Observable
 final class MiniPlayer: NSObject {
     static let shared = MiniPlayer()
 
-    /// The video area is a fixed 16:9, 384×216 pt; the glass title strip sits above it, not on it.
-    static let videoSize = NSSize(width: 384, height: 216)
-    static let stripHeight: CGFloat = 34
     /// Google wants the Referer to name the app; this is the origin every load claims.
-    static let baseURL = URL(string: "https://dev.tavsan.nab/")!
-    static let probeEnabled = ProcessInfo.processInfo.environment["NAB_PLAYER_PROBE"] == "1"
+    @ObservationIgnored static let baseURL = URL(string: "https://dev.tavsan.nab/")!
+    @ObservationIgnored static let probeEnabled = ProcessInfo.processInfo.environment["NAB_PLAYER_PROBE"] == "1"
 
-    private static let embedErrors: Set<Int> = [2, 5, 100, 101, 150, 153]
-    private static let allowedHosts = [
+    @ObservationIgnored private static let embedErrors: Set<Int> = [2, 5, 100, 101, 150, 153]
+    @ObservationIgnored private static let allowedHosts = [
         "youtube.com", "youtube-nocookie.com", "google.com", "googlevideo.com", "ytimg.com", "gstatic.com", "ggpht.com",
     ]
 
-    private var panel: PlayerPanel?
-    private var web: WKWebView?
-    private var state = PlayerState()
-    private var videoID: String?
-    private var ready = false
-    private var readyTimeout: Task<Void, Never>?
-    private var onEmbedFailure: ((String) -> Void)?
+    /// The video id the library page of that video shows the embedded player for.
+    private(set) var embeddedVideoID: String?
+    private(set) var isPinned = false
 
-    /// True for the panel and anything it opens, so the Ask window does not treat a click there as leaving.
-    func owns(_ window: NSWindow?) -> Bool { window != nil && window === panel }
+    @ObservationIgnored private var pin: PinPanel?
+    @ObservationIgnored private var web: WKWebView?
+    @ObservationIgnored private weak var embeddedHost: NSView?
+    @ObservationIgnored let state = PlayerState()
+    @ObservationIgnored private(set) var videoID: String?
+    @ObservationIgnored private var ready = false
+    @ObservationIgnored private var readyTimeout: Task<Void, Never>?
+    @ObservationIgnored private var onEmbedFailure: ((String) -> Void)?
+    @ObservationIgnored private var probeTask: Task<Void, Never>?
+    @ObservationIgnored private var target = 0
 
-    /// Shows `videoID` at `seconds`. `onEmbedFailure` runs once if YouTube refuses to embed it.
-    func play(videoID id: String, title: String?, at seconds: TimeInterval, onEmbedFailure: @escaping (String) -> Void)
-    {
+    /// True for the pin and the sign-in window, so the Ask window does not treat a click there as leaving.
+    func owns(_ window: NSWindow?) -> Bool { window != nil && window === pin || YouTubeSignIn.shared.owns(window) }
+
+    // MARK: Playing
+
+    /// Plays in the library window: the page of that video shows the player above it.
+    func playEmbedded(videoID id: String, at seconds: TimeInterval, onEmbedFailure: @escaping (String) -> Void) {
         guard YouTubeID.isValid(id) else { return }
-        let start = seconds.wholeSeconds
         self.onEmbedFailure = onEmbedFailure
-        let panel = self.panel ?? makePanel()
-        state.title = title ?? "YouTube"
-        state.videoID = id
-        if !panel.isVisible { place(panel) }
-        panel.orderFrontRegardless()
+        embeddedVideoID = id
+        start(id, seconds.wholeSeconds)
+    }
+
+    /// Plays in the pin, which is already open.
+    func playPinned(videoID id: String, at seconds: TimeInterval, onEmbedFailure: @escaping (String) -> Void) {
+        guard YouTubeID.isValid(id), isPinned else { return }
+        self.onEmbedFailure = onEmbedFailure
+        state.title = PlaybackRouter.shared.title("youtube:\(id)") ?? "YouTube"
+        start(id, seconds.wholeSeconds)
+    }
+
+    private func start(_ id: String, _ seconds: Int) {
+        target = seconds
+        ensureWeb()
         if videoID == id, ready, let web {
-            web.evaluateJavaScript("player.seekTo(\(start), true); player.playVideo();")
+            web.evaluateJavaScript("player.seekTo(\(seconds), true); player.playVideo();")
         } else {
-            load(id, start: start)
+            load(id, start: seconds)
         }
     }
 
-    func close() {
+    // MARK: Pin
+
+    /// The pin button: the embedded player grows out of its place into the floating panel, still playing.
+    func pinEmbedded() {
+        guard let id = videoID, !isPinned, let web else { return }
+        let from = embeddedHost.flatMap { host in
+            host.window.map { $0.convertToScreen(host.convert(host.bounds, to: nil)) }
+        }
+        let panel = pin ?? makePin()
+        state.title = PlaybackRouter.shared.title("youtube:\(id)") ?? "YouTube"
+        panel.root.attach(web)
+        isPinned = true
+        embeddedVideoID = nil
+        panel.open(from: from)
+    }
+
+    /// Unpin: the panel goes and the player returns to its video's page in the library window, playing on.
+    func unpin() {
+        guard isPinned, let id = videoID else { return }
+        Task {
+            let now = try? await web?.evaluateJavaScript("player.getCurrentTime()")
+            isPinned = false
+            pin?.dismiss()
+            embeddedVideoID = id
+            PlaybackRouter.shared.showInLibrary("youtube:\(id)", (now as? Double) ?? 0)
+        }
+    }
+
+    /// Closes the pin and stops playback.
+    func closePin() {
+        endPlayback()
+        pin?.dismiss()
+        isPinned = false
+    }
+
+    private func endPlayback() {
         readyTimeout?.cancel()
         web?.loadHTMLString("", baseURL: nil)
         videoID = nil
         ready = false
-        panel?.orderOut(nil)
+        embeddedVideoID = nil
     }
 
     func togglePlayback() {
@@ -65,6 +116,36 @@ final class MiniPlayer: NSObject {
 
     func openInBrowser() {
         if let videoID { PlaybackRouter.shared.openInBrowser(videoID: videoID) }
+    }
+
+    func signIn() {
+        YouTubeSignIn.shared.currentVideoID = { [weak self] in self?.videoID }
+        YouTubeSignIn.shared.show()
+    }
+
+    func signOut() {
+        Task {
+            await YouTubeSignIn.shared.signOut()
+            // Reload so the player forgets the account at once.
+            if let id = videoID { load(id, start: 0) }
+        }
+    }
+
+    // MARK: Embedded host
+
+    fileprivate func attachEmbedded(_ host: NSView) {
+        embeddedHost = host
+        ensureWeb()
+        if let web, !isPinned {
+            host.addSubview(web)
+            web.frame = host.bounds
+        }
+    }
+
+    fileprivate func detachEmbedded(_ host: NSView) {
+        guard let web, web.superview === host else { return }
+        web.evaluateJavaScript("player && player.pauseVideo && player.pauseVideo();")
+        web.removeFromSuperview()
     }
 
     // MARK: Loading
@@ -98,13 +179,13 @@ final class MiniPlayer: NSObject {
             guard !Task.isCancelled, let self, !self.ready, self.videoID == id else { return }
             self.failEmbed()
         }
-        if Self.probeEnabled { probe(start: start) }
     }
 
     private func failEmbed() {
+        if Self.probeEnabled { log("embed failure") }
         guard let id = videoID, let callback = onEmbedFailure else { return }
         onEmbedFailure = nil
-        close()
+        if isPinned { closePin() } else { endPlayback() }
         callback(id)
     }
 
@@ -115,66 +196,59 @@ final class MiniPlayer: NSObject {
             ready = true
             readyTimeout?.cancel()
         case "error":
+            if Self.probeEnabled { log("error \(message["c"] ?? "?")") }
             if let code = message["c"] as? Int, Self.embedErrors.contains(code) { failEmbed() }
         default: break
         }
     }
 
-    /// With `NAB_PLAYER_PROBE=1`: a few seconds after the load, logs where the player is against where it was sent.
-    private func probe(start: Int) {
-        Task { [weak self] in
-            for delay in [3.0, 6.0] {
-                try? await Task.sleep(for: .seconds(delay))
-                guard let self, let web = self.web else { return }
+    // MARK: Probe
+
+    private func log(_ text: String) { FileHandle.standardError.write(Data("[player] \(text)\n".utf8)) }
+
+    /// With `NAB_PLAYER_PROBE=1`: every 2 s logs where the player is against where it was last sent, and where.
+    private func startProbe() {
+        guard Self.probeEnabled, probeTask == nil else { return }
+        probeTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(2))
+                guard let self, let web = self.web, self.videoID != nil else { continue }
                 let now = try? await web.evaluateJavaScript("player.getCurrentTime()")
-                let line = "[player] target=\(start) current=\(now.map { "\($0)" } ?? "?") ready=\(self.ready)\n"
-                FileHandle.standardError.write(Data(line.utf8))
+                let frame = self.isPinned ? (self.pin.map { NSStringFromRect($0.frame) } ?? "?") : "-"
+                self.log(
+                    "mode=\(self.isPinned ? "pin" : "embedded") video=\(self.videoID ?? "-") target=\(self.target) "
+                        + "current=\(now.map { "\($0)" } ?? "?") panel=\(frame)")
             }
         }
     }
 
-    // MARK: Window
+    // MARK: Web view
 
-    private func makePanel() -> PlayerPanel {
+    private func ensureWeb() {
+        guard web == nil else { return }
         let config = WKWebViewConfiguration()
         config.mediaTypesRequiringUserActionForPlayback = []
-        config.websiteDataStore = .nonPersistent()
+        // The persistent store: a YouTube sign-in made in the sign-in window lasts, and Sign Out clears it.
+        config.websiteDataStore = .default()
         let proxy = ScriptProxy(owner: self)
         config.userContentController.add(proxy, name: "nab")
-        let web = WKWebView(frame: NSRect(origin: .zero, size: Self.videoSize), configuration: config)
+        let web = WKWebView(frame: NSRect(x: 0, y: 0, width: 384, height: 216), configuration: config)
         web.navigationDelegate = proxy
         web.uiDelegate = proxy
         web.setValue(false, forKey: "drawsBackground")
         self.web = web
-
-        let strip = NSHostingView(
-            rootView: PlayerStrip(
-                state: state, openInBrowser: { [weak self] in self?.openInBrowser() },
-                close: { [weak self] in self?.close() }))
-        let size = NSSize(width: Self.videoSize.width, height: Self.videoSize.height + Self.stripHeight)
-        let root = NSView(frame: NSRect(origin: .zero, size: size))
-        root.wantsLayer = true
-        root.layer?.cornerRadius = Radius.card
-        root.layer?.cornerCurve = .continuous
-        root.layer?.masksToBounds = true
-        root.layer?.backgroundColor = NSColor.black.cgColor
-        web.frame = NSRect(origin: .zero, size: Self.videoSize)
-        strip.frame = NSRect(x: 0, y: Self.videoSize.height, width: size.width, height: Self.stripHeight)
-        root.addSubview(web)
-        root.addSubview(strip)
-
-        let panel = PlayerPanel(contentRect: NSRect(origin: .zero, size: size))
-        panel.contentView = root
-        panel.onClose = { [weak self] in self?.close() }
-        panel.onToggle = { [weak self] in self?.togglePlayback() }
-        self.panel = panel
-        return panel
+        startProbe()
     }
 
-    private func place(_ panel: PlayerPanel) {
-        if panel.setFrameUsingName(PlayerPanel.autosaveName) { return }
-        let visible = (NSScreen.main ?? NSScreen.screens.first)?.visibleFrame ?? .zero
-        panel.setFrameOrigin(NSPoint(x: visible.maxX - panel.frame.width - Space.xl, y: visible.minY + Space.xl))
+    private func makePin() -> PinPanel {
+        let panel = PinPanel(state: state)
+        panel.onToggle = { [weak self] in self?.togglePlayback() }
+        panel.root.actions = PinActions(
+            close: { [weak self] in self?.closePin() }, unpin: { [weak self] in self?.unpin() },
+            openInBrowser: { [weak self] in self?.openInBrowser() }, signIn: { [weak self] in self?.signIn() },
+            signOut: { [weak self] in self?.signOut() })
+        pin = panel
+        return panel
     }
 
     // MARK: Navigation policy
@@ -225,69 +299,53 @@ private final class ScriptProxy: NSObject, WKScriptMessageHandler, WKNavigationD
 
 @MainActor
 @Observable
-private final class PlayerState {
+final class PlayerState {
     var title = ""
-    var videoID = ""
 }
 
-/// The glass strip above the video: title, open in the browser, close.
-private struct PlayerStrip: View {
-    let state: PlayerState
-    let openInBrowser: () -> Void
-    let close: () -> Void
+// MARK: Embedded in the library window
 
+/// The player above a video's page: 16:9 at column width, with the pin button in a row above it (nothing is drawn
+/// over the video itself).
+struct EmbeddedPlayer: View {
     var body: some View {
-        HStack(spacing: Space.xs) {
-            Text(state.title)
-                .font(Typeface.meta)
-                .foregroundStyle(Palette.ink)
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            IconButton(symbol: "arrow.up.right.square", help: "Open on YouTube", action: openInBrowser)
-            IconButton(symbol: "xmark", help: "Close (Esc)", action: close)
+        VStack(alignment: .trailing, spacing: Space.xs) {
+            IconButton(symbol: "pin", help: "Pin the player: it floats above your other windows") {
+                MiniPlayer.shared.pinEmbedded()
+            }
+            EmbedHostView()
+                .aspectRatio(16 / 9, contentMode: .fit)
+                .clipShape(.rect(cornerRadius: Radius.thumb, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: Radius.thumb, style: .continuous).strokeBorder(Palette.line))
         }
-        .padding(.leading, Space.m)
-        .padding(.trailing, Space.xs)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .glassEffect(.regular, in: .rect(cornerRadius: 0))
     }
 }
 
-/// A floating, non-activating panel: the browser stays in front and the Ask window stays open while it is used.
-private final class PlayerPanel: NSPanel {
-    static let autosaveName = "dev.tavsan.nab.miniplayer"
-    var onClose: () -> Void = {}
-    var onToggle: () -> Void = {}
-
-    init(contentRect: NSRect) {
-        super.init(
-            contentRect: contentRect, styleMask: [.borderless, .nonactivatingPanel, .fullSizeContentView],
-            backing: .buffered, defer: true)
-        isFloatingPanel = true
-        level = .floating
-        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
-        hidesOnDeactivate = false
-        isMovableByWindowBackground = true
-        hasShadow = true
-        isOpaque = false
-        backgroundColor = .clear
-        animationBehavior = .none
-        setFrameAutosaveName(Self.autosaveName)
+private struct EmbedHostView: NSViewRepresentable {
+    func makeNSView(context: Context) -> EmbedHost {
+        let host = EmbedHost()
+        MiniPlayer.shared.attachEmbedded(host)
+        return host
     }
 
-    override var canBecomeKey: Bool { true }
-    override var canBecomeMain: Bool { false }
+    func updateNSView(_ host: EmbedHost, context: Context) {}
 
-    /// Keys are taken before the web view sees them, so Space and Esc mean the same wherever the focus is.
-    override func sendEvent(_ event: NSEvent) {
-        if event.type == .keyDown {
-            let flags = event.modifierFlags.intersection([.command, .shift, .option, .control])
-            let key = Int(event.keyCode)
-            if flags.isEmpty, key == kVK_Escape { return onClose() }
-            if flags.isEmpty, key == kVK_Space { return onToggle() }
-            if flags == .command, key == kVK_ANSI_W { return onClose() }
-        }
-        super.sendEvent(event)
+    static func dismantleNSView(_ host: EmbedHost, coordinator: ()) {
+        MiniPlayer.shared.detachEmbedded(host)
+    }
+}
+
+private final class EmbedHost: NSView {
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.black.cgColor
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func layout() {
+        super.layout()
+        for view in subviews { view.frame = bounds }
     }
 }

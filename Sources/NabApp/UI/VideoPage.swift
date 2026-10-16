@@ -104,7 +104,11 @@ private struct VideoContent: View {
     private var aside: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                VideoCover(entry: entry, onClipboard: model.center.copiedIDs.contains(entry.id))
+                if MiniPlayer.shared.embeddedVideoID == YouTubeID.id(fromEntryID: entry.id) {
+                    EmbeddedPlayer()
+                } else {
+                    VideoCover(entry: entry, onClipboard: model.center.copiedIDs.contains(entry.id))
+                }
                 VStack(alignment: .leading, spacing: 6) {
                     Text(entry.title)
                         .font(Typeface.videoTitle)
@@ -652,7 +656,7 @@ private struct VideoCover: View {
 
     var body: some View {
         Button {
-            PlaybackRouter.shared.openInBrowser(entryID: entry.id)
+            PlaybackRouter.shared.play(entryID: entry.id, at: 0)
         } label: {
             Palette.well
                 .aspectRatio(16 / 9, contentMode: .fit)
@@ -690,7 +694,7 @@ private struct VideoCover: View {
         }
         .buttonStyle(PressableStyle(scale: 0.99))
         .onHover { over in withAnimation(Motion.snap) { hovering = over } }
-        .help("Open on YouTube")
+        .help("Play the video")
         .accessibilityLabel("Open the video")
         .task(id: entry.id) {
             guard CoverCache.cached(entry) == nil else { return }

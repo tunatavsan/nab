@@ -15,20 +15,39 @@ struct PlaybackPlanTests {
         #expect(YouTubeID.id(fromEntryID: "youtube:x'); evil") == nil)
     }
 
-    @Test func nabSettingTriesTheMiniPlayerFirst() {
-        #expect(PlaybackPlan.targets(setting: .nab, embedFailed: false) == [.mini, .tabScript, .tabAddress, .newTab])
-        #expect(PlaybackPlan.targets(setting: .nab, embedFailed: true) == [.tabScript, .tabAddress, .newTab])
+    @Test func anOpenTabAlwaysComesFirst() {
+        for setting in [PlaybackPlan.Setting.nab, .browser] {
+            for pin in [true, false] {
+                let plan = PlaybackPlan.targets(setting: setting, pinOpen: pin, embedFailed: false)
+                #expect(Array(plan.prefix(2)) == [.tabScript, .tabAddress], "\(setting) pin \(pin)")
+            }
+        }
     }
 
-    @Test func browserSettingSkipsTheMiniPlayer() {
-        #expect(PlaybackPlan.targets(setting: .browser, embedFailed: false) == [.tabScript, .tabAddress, .newTab])
+    @Test func withoutATabThePinThenTheMainWindowFollow() {
+        #expect(
+            PlaybackPlan.targets(setting: .nab, pinOpen: true, embedFailed: false, tabMatch: false) == [.pin])
+        #expect(
+            PlaybackPlan.targets(setting: .nab, pinOpen: false, embedFailed: false, tabMatch: false) == [.mainWindow])
+        #expect(
+            PlaybackPlan.targets(setting: .nab, pinOpen: false, embedFailed: false)
+                == [.tabScript, .tabAddress, .mainWindow])
+    }
+
+    @Test func browserSettingReplacesTheMainWindowButNotThePin() {
+        #expect(
+            PlaybackPlan.targets(setting: .browser, pinOpen: false, embedFailed: false, tabMatch: false) == [.newTab])
+        #expect(PlaybackPlan.targets(setting: .browser, pinOpen: true, embedFailed: false, tabMatch: false) == [.pin])
+    }
+
+    @Test func aVideoThatWillNotEmbedGoesToTheBrowser() {
+        #expect(PlaybackPlan.targets(setting: .nab, pinOpen: true, embedFailed: true, tabMatch: false) == [.newTab])
     }
 
     @Test func whatTheBrowserAnswersNarrowsTheList() {
         #expect(
-            PlaybackPlan.targets(setting: .browser, embedFailed: false, tabMatch: true, jsAllowed: false)
-                == [.tabAddress, .newTab])
-        #expect(PlaybackPlan.targets(setting: .browser, embedFailed: false, tabMatch: false) == [.newTab])
+            PlaybackPlan.targets(setting: .nab, pinOpen: false, embedFailed: false, tabMatch: true, jsAllowed: false)
+                == [.tabAddress, .mainWindow])
     }
 
     @Test func unknownSettingFallsBackToNab() {
