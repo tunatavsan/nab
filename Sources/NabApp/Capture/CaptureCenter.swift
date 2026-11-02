@@ -311,10 +311,7 @@ final class CaptureCenter {
                     detail: "Press \(shortcut) with a \(RackText.list(registry.names, "or")) page in front."))
             return
         }
-        guard CopyPayload.missing(captures).isEmpty else { return showMissing(session) }
-        let payload = CopyPayload.session(captures)
-        Pasteboard.write(payload)
-        ownCopyCount = Pasteboard.board.changeCount
+        guard let payload = copy(session) else { return }
         sessionConsumed = true
         persistSession()
         let pending = session.count - captures.count
@@ -324,8 +321,25 @@ final class CaptureCenter {
                 detail: Self.pasteHint(payload) + (pending > 0 ? " · \(pending) still fetching" : "")))
     }
 
-    /// Says that saved files are gone instead of copying links to nothing, and offers to save them again.
-    private func showMissing(_ candidates: [Entry]) {
+    /// The one way Nab copies items, wherever the copy starts (the shortcut, a button, a menu, the palette): photos
+    /// and clips as their files, anything read as text as one context pack, and nothing at all when a saved file is
+    /// gone (the rack says so and offers to save it again). Returns what went on the clipboard, nil when nothing did.
+    @discardableResult
+    func copy(_ entries: [Entry]) -> CopyPayload? {
+        let captures = entries.compactMap(\.capture)
+        guard !captures.isEmpty else { return nil }
+        guard CopyPayload.missing(captures).isEmpty else {
+            noteMissing(entries)
+            return nil
+        }
+        let payload = CopyPayload.session(captures)
+        Pasteboard.write(payload)
+        ownCopyCount = Pasteboard.board.changeCount
+        return payload
+    }
+
+    /// Says that saved files are gone instead of handing over links to nothing, and offers to save them again.
+    func noteMissing(_ candidates: [Entry]) {
         let hit = candidates.compactMap { entry in
             entry.capture.map { (entry, CopyPayload.missing([$0])) }
         }.filter { !$0.1.isEmpty }
@@ -378,7 +392,7 @@ final class CaptureCenter {
         // nabbing several items in a row leaves the latest one on the clipboard.
         let current = Pasteboard.board.changeCount
         if current == mark || current == ownCopyCount {
-            guard CopyPayload.missing([capture]).isEmpty else { return showMissing([entry]) }
+            guard CopyPayload.missing([capture]).isEmpty else { return noteMissing([entry]) }
             let payload = CopyPayload.single(capture)
             Pasteboard.write(payload)
             ownCopyCount = Pasteboard.board.changeCount

@@ -42,9 +42,11 @@ struct OnboardingView: View {
         VStack(spacing: 18) {
             AppMark()
             heading("Welcome to Nab")
-            Text("Nab turns a YouTube video into text an AI can read, and puts it on your clipboard.")
-                .font(Typeface.reading).lineSpacing(5).foregroundStyle(Palette.inkSecondary)
-                .multilineTextAlignment(.center).frame(maxWidth: 440)
+            Text(
+                "Nab reads \(RackText.list(model.center.registry.names)) links, turns what it finds into text an AI can read, and puts it on your clipboard."
+            )
+            .font(Typeface.reading).lineSpacing(5).foregroundStyle(Palette.inkSecondary)
+            .multilineTextAlignment(.center).frame(maxWidth: 440)
             HStack(spacing: 10) {
                 ZStack {
                     QuoteMark(part: .left).fill(Palette.accent)

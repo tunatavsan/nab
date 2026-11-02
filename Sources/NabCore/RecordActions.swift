@@ -5,12 +5,14 @@ public enum RecordActions {
     /// "Open on YouTube", "Open on Pinterest".
     public static func openLabel(sourceName: String) -> String { "Open on \(sourceName)" }
 
-    /// The saved files "Show in Finder" selects: only those still on disk; empty for a record read as text.
+    /// The saved files "Show in Finder" selects: only those Copy would hand over (on disk at the size they were saved
+    /// at); empty for a record read as text. `size` is a file's size, nil when there is none.
     public static func finderFiles(
-        _ capture: Capture, exists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
+        _ capture: Capture, size: (String) -> Int64? = { MediaProbe.fileSize(atPath: $0) }
     ) -> [URL] {
-        capture.media.compactMap { item in
-            guard let path = item.savedPath, exists(path) else { return nil }
+        let missing = CopyPayload.missing([capture], size: size)
+        return capture.media.compactMap { item in
+            guard let path = item.savedPath, !missing.contains(item) else { return nil }
             return URL(filePath: path)
         }
     }

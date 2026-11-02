@@ -19,14 +19,19 @@ import Testing
 
     @Test func finderSelectsOnlyFilesThatAreStillThere() {
         let capture = pin(saved: ["/m/a.jpg", "/m/gone.jpg", nil])
-        let files = RecordActions.finderFiles(capture, exists: { $0 != "/m/gone.jpg" })
+        let files = RecordActions.finderFiles(capture, size: { $0 == "/m/gone.jpg" ? nil : 1 })
         #expect(files.map(\.path) == ["/m/a.jpg"])
+        // A file cut short is not handed to Finder either, the same as Copy.
+        var short = pin(saved: ["/m/a.jpg"])
+        short.media[0].byteCount = 10
+        #expect(RecordActions.finderFiles(short, size: { _ in 9 }).isEmpty)
+        #expect(RecordActions.finderFiles(short, size: { _ in 10 }).map(\.path) == ["/m/a.jpg"])
     }
 
     @Test func aRecordReadAsTextHasNothingForFinder() {
         let text = Capture(
             source: .youtube, sourceID: "dQw4w9WgXcQ", url: URL(string: "https://youtu.be/dQw4w9WgXcQ")!, title: "T")
-        #expect(RecordActions.finderFiles(text, exists: { _ in true }).isEmpty)
+        #expect(RecordActions.finderFiles(text, size: { _ in 1 }).isEmpty)
     }
 
     @Test func twoAbsencesAreNotAMatchForTheEmbeddedPlayer() {

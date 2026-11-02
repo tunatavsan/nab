@@ -27,8 +27,8 @@ struct SessionPage: View {
         HStack(spacing: Space.s) {
             VStack(spacing: 0) {
                 SourcesStrip(
-                    entries: entries, numbered: numbered, selected: drawerID, copy: model.copyContext,
-                    saving: { model.center.savingProgress[$0] }
+                    entries: entries, numbered: numbered, selected: drawerID, copy: model.copyPage,
+                    saving: { model.center.savingProgress[$0] }, missing: model.center.noteMissing
                 ) { entry in
                     withAnimation(drawerMotion) {
                         drawerID = entry.id
@@ -90,6 +90,7 @@ private struct SourcesStrip: View {
     let selected: String?
     let copy: () -> Void
     let saving: (String) -> Double?
+    let missing: ([Entry]) -> Void
     let open: (Entry) -> Void
 
     var body: some View {
@@ -97,9 +98,9 @@ private struct SourcesStrip: View {
             HStack {
                 Text("Sources · \(entries.count)").font(Typeface.label).foregroundStyle(Palette.inkTertiary)
                 Spacer(minLength: Space.s)
-                // ⇧⌘C is the library's copy-context shortcut on every page.
+                // ⇧⌘C is the library's copy shortcut on every page.
                 NabButton("Copy all", shortcut: "⇧⌘C", kind: .ghost, action: copy)
-                    .help("Copy the session for AI (⇧⌘C)")
+                    .help("Copy the session: photos and clips as files, videos as context (⇧⌘C)")
             }
             GeometryReader { proxy in
                 let width = max(
@@ -109,7 +110,7 @@ private struct SourcesStrip: View {
                         ForEach(entries) { entry in
                             SourceCard(
                                 entry: entry, number: numbered.firstIndex { $0.id == entry.id }.map { $0 + 1 },
-                                on: selected == entry.id, saving: saving(entry.id)
+                                on: selected == entry.id, saving: saving(entry.id), missing: missing
                             ) { open(entry) }
                             .frame(width: width)
                         }
@@ -131,6 +132,7 @@ private struct SourceCard: View {
     let number: Int?
     let on: Bool
     var saving: Double?
+    let missing: ([Entry]) -> Void
     let action: () -> Void
     @State private var hovering = false
 
@@ -161,7 +163,7 @@ private struct SourceCard: View {
         }
         .buttonStyle(PressableStyle(scale: 0.98))
         .onHover { over in withAnimation(Motion.snap) { hovering = over } }
-        .dragSource(entry.capture)
+        .dragSource(entry, onMissing: missing)
         .accessibilityLabel(
             showsMedia ? "Show the photos and clips of \(entry.title)" : "Open the transcript of \(entry.title)"
         )

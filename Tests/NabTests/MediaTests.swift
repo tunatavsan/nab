@@ -163,7 +163,11 @@ struct MediaTests {
         #expect(RackText.count(Tally(videos: 1, photos: 2, items: 1)) == "1 video, 2 photos and 1 item")
         #expect(RackText.copied(Tally(photos: 4)) == "Copied 4 photos")
         var video = Entry(id: "youtube:a", url: URL(string: "https://youtu.be/a")!)
-        video.capture = Capture(source: .youtube, sourceID: "a", url: video.url, title: "A")
+        video.capture = Capture(
+            source: .youtube, sourceID: "a", url: video.url, title: "A",
+            transcript: Transcript(
+                languageCode: "en", languageName: nil, isGenerated: false,
+                segments: [Segment(start: 0, duration: 1, text: "hi")]))
         var pin = Entry(id: "pinterest:1", url: URL(string: "https://pin.it/a")!)
         pin.capture = Self.pin([Self.photo, Self.photo, Self.clip])
         let fetching = Entry(id: "pinterest:2", url: URL(string: "https://pin.it/b")!)

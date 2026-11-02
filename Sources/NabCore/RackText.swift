@@ -118,8 +118,9 @@ public enum RackText {
     }
 }
 
-/// How many of each kind a set of items holds. An item read as text is a video; an item made of photos and clips
-/// counts each of them; an item still being fetched is an item.
+/// How many of each kind a set of items holds. An item read as a transcript is a video, one with no media and no
+/// transcript is an item; an item made of photos and clips counts each of them; an item still being fetched is an
+/// item.
 public struct Tally: Equatable, Sendable {
     public var videos = 0
     public var photos = 0
@@ -143,13 +144,22 @@ public struct Tally: Equatable, Sendable {
                 items += 1
                 continue
             }
-            if capture.isMedia { self = self + Tally(capture.media) } else { videos += 1 }
+            add(capture)
         }
     }
 
     public init(captures: [Capture]) {
-        for capture in captures {
-            if capture.isMedia { self = self + Tally(capture.media) } else { videos += 1 }
+        for capture in captures { add(capture) }
+    }
+
+    /// Photos and clips count each; a record read as a transcript is a video; one with neither is only an item.
+    private mutating func add(_ capture: Capture) {
+        if capture.isMedia {
+            self = self + Tally(capture.media)
+        } else if capture.transcript != nil {
+            videos += 1
+        } else {
+            items += 1
         }
     }
 

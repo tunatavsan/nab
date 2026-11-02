@@ -9,23 +9,29 @@ extension Pasteboard {
     static func write(_ payload: CopyPayload) {
         switch payload {
         case .text(let text): copy(text)
-        case .files(let files):
+        case .files:
             let board = Pasteboard.board
             board.clearContents()
-            let items = files.map { file -> NSPasteboardItem in
-                let item = NSPasteboardItem()
-                item.setString(file.absoluteString, forType: .fileURL)
-                return item
-            }
-            if let file = payload.loneImage, let type = UTType(filenameExtension: file.pathExtension),
-                let data = try? Data(contentsOf: file)
-            {
-                items[0].setData(data, forType: NSPasteboard.PasteboardType(type.identifier))
-                if type != .png, type != .tiff, let tiff = NSImage(data: data)?.tiffRepresentation {
-                    items[0].setData(tiff, forType: .tiff)
-                }
-            }
-            board.writeObjects(items)
+            board.writeObjects(fileItems(payload))
         }
+    }
+
+    /// One pasteboard item per file; a lone photo's item also carries the picture. A copy and a drag use the same.
+    static func fileItems(_ payload: CopyPayload) -> [NSPasteboardItem] {
+        guard case .files(let files) = payload else { return [] }
+        let items = files.map { file -> NSPasteboardItem in
+            let item = NSPasteboardItem()
+            item.setString(file.absoluteString, forType: .fileURL)
+            return item
+        }
+        if let file = payload.loneImage, let type = UTType(filenameExtension: file.pathExtension),
+            let data = try? Data(contentsOf: file)
+        {
+            items[0].setData(data, forType: NSPasteboard.PasteboardType(type.identifier))
+            if type != .png, type != .tiff, let tiff = NSImage(data: data)?.tiffRepresentation {
+                items[0].setData(tiff, forType: .tiff)
+            }
+        }
+        return items
     }
 }

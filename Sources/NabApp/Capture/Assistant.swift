@@ -84,6 +84,10 @@ final class Assistant {
 
     func conversation(_ entryIDs: [String]) -> Conversation? { byID[Conversation.id(for: entryIDs)] }
     func isStreaming(_ entryIDs: [String]) -> Bool { streaming.contains(Conversation.id(for: entryIDs)) }
+    /// How many of these records have a transcript to read.
+    func transcriptCount(_ entryIDs: [String]) -> Int {
+        entryIDs.count { center.entry($0)?.capture?.transcript != nil }
+    }
     func isWaiting(_ entryIDs: [String]) -> Bool { waiting[Conversation.id(for: entryIDs)] != nil }
 
     /// Loads a saved chat the first time its videos are shown.

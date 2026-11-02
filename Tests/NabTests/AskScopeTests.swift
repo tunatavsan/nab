@@ -60,6 +60,24 @@ import Testing
             AskScope.heading(summary: true, question: nil, tally: Tally(videos: 1), title: nil) == "SUMMARY · 1 VIDEO")
     }
 
+    @Test func theWaitingLabelFollowsWhatThereIsToRead() {
+        #expect(AskScope.readingLabel(transcripts: 1, total: 1) == "Reading the transcript")
+        #expect(AskScope.readingLabel(transcripts: 0, total: 1) == "Reading the details")
+        #expect(AskScope.readingLabel(transcripts: 3, total: 3) == "Reading 3 transcripts")
+        #expect(AskScope.readingLabel(transcripts: 1, total: 3) == "Reading 3 items")
+    }
+
+    @Test func aRecordWithNoTranscriptGetsQuestionsThatDoNotNeedOne() {
+        let spoken = AskScope.presets(single: true, hasTranscript: true)
+        let silent = AskScope.presets(single: true, hasTranscript: false)
+        #expect(spoken.count == 4)
+        #expect(Set(spoken).isDisjoint(with: silent))
+        #expect(silent.allSatisfy { !$0.contains("mentioned") && !$0.contains("argument") })
+        #expect(
+            AskScope.presets(single: false, hasTranscript: false)
+                == AskScope.presets(single: false, hasTranscript: true))
+    }
+
     @Test func questionHeadingIsTheQuestion() {
         #expect(
             AskScope.heading(summary: false, question: "  Which one first?\n", tally: Tally(videos: 3), title: nil)

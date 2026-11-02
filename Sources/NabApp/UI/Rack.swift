@@ -168,7 +168,7 @@ private struct RackView: View {
             )
             .onTapGesture { open(card.entry?.id) }
         case .ready:
-            ReadyCard(entry: card.entry, toast: toast, copied: copied)
+            ReadyCard(entry: card.entry, toast: toast, copied: copied, noteMissing: center.noteMissing)
                 .onTapGesture { open(card.entry?.id) }
         case .stack:
             StackCard(
@@ -275,6 +275,7 @@ private struct ReadyCard: View {
     let entry: Entry?
     let toast: CaptureCenter.Toast
     let copied: Bool
+    let noteMissing: ([Entry]) -> Void
 
     private var failed: Bool { toast.tone == .failed }
 
@@ -294,7 +295,7 @@ private struct ReadyCard: View {
             }
         }
         .accessibilityElement(children: .combine)
-        .dragSource(failed ? nil : entry?.capture)
+        .dragSource(failed ? nil : entry, onMissing: noteMissing)
         .frameProbe("toast.update", Double(toast.pulse))
     }
 

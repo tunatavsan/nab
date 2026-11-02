@@ -80,7 +80,11 @@ struct HomeLayoutTests {
         var pin = entry("p", hoursAgo: 5, session: "s")
         pin.capture = MediaTests.pin([MediaTests.photo, MediaTests.clip])
         var text = entry("t", hoursAgo: 5.01, session: "s")
-        text.capture = Capture(source: .youtube, sourceID: "t", url: text.url, title: "A")
+        text.capture = Capture(
+            source: .youtube, sourceID: "t", url: text.url, title: "A",
+            transcript: Transcript(
+                languageCode: "en", languageName: nil, isGenerated: false,
+                segments: [Segment(start: 0, duration: 1, text: "hi")]))
         let session = try #require(layout([pin, text]).days.first?.sessions.first)
         #expect(session.label.hasSuffix("· 2 videos and 1 photo"))
     }
