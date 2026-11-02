@@ -83,3 +83,41 @@ struct LibrarySearchTests {
         #expect(LibrarySearch.search("zzz", entries: entries, chats: []).isEmpty)
     }
 }
+
+@Suite("Library search: descriptions and drags")
+struct PinDescriptionTests {
+    private func pin(_ id: String, title: String, summary: String?, saved: [String] = []) -> Capture {
+        Capture(
+            source: .youtube, sourceID: id, url: URL(string: "https://example.com/\(id)")!, title: title,
+            summary: summary,
+            media: saved.map {
+                Media(kind: .image, url: URL(string: "https://example.com/\($0)")!, savedPath: "/tmp/\($0)")
+            })
+    }
+
+    @Test func aDescriptionWordFindsTheItemBelowTitleMatches() {
+        var described = Entry(id: "a", url: URL(string: "https://example.com/a")!)
+        described.capture = pin("a", title: "Pin one", summary: "Hand-thrown ceramic mug")
+        var titled = Entry(id: "b", url: URL(string: "https://example.com/b")!)
+        titled.capture = pin("b", title: "Ceramic shelf", summary: nil)
+        let result = LibrarySearch.search("ceramic", entries: [described, titled], chats: [])
+        #expect(result.videos.map(\.entryID) == ["b", "a"])
+        #expect(LibrarySearch.search("walnut", entries: [described, titled], chats: []).videos.isEmpty)
+    }
+
+    @Test func aDragCarriesWhatCopyCarriesAndStopsWhenAFileIsGone() {
+        let photo = pin("p", title: "Photo", summary: nil, saved: ["one.png", "two.png"])
+        #expect(DragPayload.resolve(photo, exists: { _ in true }) == CopyPayload.single(photo))
+        guard case .files(let files)? = DragPayload.resolve(photo, exists: { _ in true }) else {
+            Issue.record("expected files")
+            return
+        }
+        #expect(files.count == 2)
+        #expect(DragPayload.resolve(photo, exists: { $0.hasSuffix("one.png") }) == nil)
+        let text = pin("t", title: "Text", summary: nil)
+        guard case .text? = DragPayload.resolve(text, exists: { _ in false }) else {
+            Issue.record("expected text")
+            return
+        }
+    }
+}

@@ -124,6 +124,7 @@ private struct VideoContent: View {
                         .fixedSize(horizontal: false, vertical: true)
                     status
                 }
+                .dragSource(capture)
                 chips
                 actions
                 if !chapters.isEmpty { chapterList }

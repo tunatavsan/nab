@@ -541,6 +541,7 @@ private struct TrayRow: View {
         .buttonStyle(PressableStyle(scale: 0.98))
         .onHover { over in withAnimation(Motion.snap) { hovering = over } }
         .animation(Motion.snap, value: entry.phase)
+        .dragSource(entry.capture)
         .accessibilityLabel("\(entry.title), \(statusText)")
         .accessibilityHint("Opens it in the library")
         .contextMenu {
