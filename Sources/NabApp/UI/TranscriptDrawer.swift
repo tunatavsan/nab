@@ -15,6 +15,8 @@ struct TranscriptDrawer: View {
     /// Matches for `query`, rebuilt after typing pauses rather than on every render.
     @State private var search = TranscriptSearch(paragraphs: [], query: "")
     @State private var copied = false
+    /// A copy found a saved file gone.
+    @State private var blocked = false
     @FocusState private var finding: Bool
 
     var body: some View {
@@ -23,14 +25,19 @@ struct TranscriptDrawer: View {
         let lit = focus.flatMap { focus in paragraphs.lastIndex { $0.start <= focus.seconds + 0.5 } }
         VStack(spacing: 0) {
             header
-            findField
-            if paragraphs.isEmpty {
-                Text(entry.phase == .fetching ? "Fetching transcript…" : "This video has no captions.")
-                    .font(Typeface.meta)
-                    .foregroundStyle(Palette.inkTertiary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            if isMedia {
+                MediaGallery(entry: entry, center: model.center, inset: Space.l)
+                if blocked { MissingNote { model.center.retry(entry.id) }.padding(.bottom, Space.s) }
             } else {
-                passages(paragraphs, capture: capture, lit: lit)
+                findField
+                if paragraphs.isEmpty {
+                    Text(entry.phase == .fetching ? "Fetching transcript…" : "This video has no captions.")
+                        .font(Typeface.meta)
+                        .foregroundStyle(Palette.inkTertiary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    passages(paragraphs, capture: capture, lit: lit)
+                }
             }
             footer(paragraphs)
         }
@@ -72,7 +79,7 @@ struct TranscriptDrawer: View {
                     .font(Typeface.rowTitle)
                     .foregroundStyle(Palette.ink)
                     .lineLimit(1)
-                Text("Transcript" + (language.map { " · \($0)" } ?? ""))
+                Text(subtitle)
                     .font(Typeface.meta)
                     .foregroundStyle(Palette.inkTertiary)
             }
@@ -94,6 +101,13 @@ struct TranscriptDrawer: View {
         .padding(.top, 14)
         .padding(.bottom, 10)
     }
+
+    private var subtitle: String {
+        if isMedia { return entry.capture.flatMap { RackText.kindLine($0) } ?? "" }
+        return "Transcript" + (language.map { " · \($0)" } ?? "")
+    }
+
+    private var isMedia: Bool { entry.capture?.isMedia == true }
 
     private var language: String? {
         entry.capture?.transcript.map { $0.languageName ?? $0.languageCode }
@@ -161,13 +175,22 @@ struct TranscriptDrawer: View {
             Button {
                 model.go(.video(entry.id))
             } label: {
-                DrawerLinkLabel(title: "Open full transcript ›", rest: Palette.inkSecondary)
+                DrawerLinkLabel(title: isMedia ? "Open page ›" : "Open full transcript ›", rest: Palette.inkSecondary)
             }
             .buttonStyle(PressableStyle(scale: 0.97))
-            .help("Open the video page")
+            .help(isMedia ? "Open its page" : "Open the video page")
             Spacer()
             Button {
-                Pasteboard.copy(TranscriptText.plain(paragraphs))
+                if isMedia, let capture = entry.capture {
+                    guard CopyPayload.missing([capture]).isEmpty else {
+                        withAnimation(Motion.snap) { blocked = true }
+                        return
+                    }
+                    blocked = false
+                    Pasteboard.write(CopyPayload.single(capture))
+                } else {
+                    Pasteboard.copy(TranscriptText.plain(paragraphs))
+                }
                 withAnimation(Motion.snap) { copied = true }
                 Task {
                     try? await Task.sleep(for: .seconds(1.4))
@@ -177,8 +200,8 @@ struct TranscriptDrawer: View {
                 DrawerLinkLabel(title: copied ? "Copied" : "Copy", rest: Palette.inkTertiary)
             }
             .buttonStyle(PressableStyle(scale: 0.97))
-            .disabled(paragraphs.isEmpty)
-            .help("Copy the transcript")
+            .disabled(paragraphs.isEmpty && !isMedia)
+            .help(isMedia ? "Copy the files" : "Copy the transcript")
         }
         .padding(.horizontal, Space.l)
         .padding(.vertical, Space.m)
