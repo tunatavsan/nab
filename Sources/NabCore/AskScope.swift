@@ -27,8 +27,11 @@ public enum AskScope: Sendable, Hashable {
         return best?.id
     }
 
-    /// An empty session starts on the latest video.
-    public static func initial(sessionIDs: [String]) -> AskScope { sessionIDs.isEmpty ? .latest : .session }
+    /// An empty session starts on the latest record. A `focus` (the front tab the shortcut just nabbed) always wins,
+    /// even when the session holds others: the question is about what the user is looking at.
+    public static func initial(sessionIDs: [String], focus: String? = nil) -> AskScope {
+        focus != nil || sessionIDs.isEmpty ? .latest : .session
+    }
 
     public static func ids(for scope: AskScope, session: [String], latest: String?) -> [String] {
         switch scope {
@@ -75,5 +78,66 @@ public enum AskScope: Sendable, Hashable {
     public static func draft(fromLinkText text: String?) -> String? {
         guard let text = text?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return nil }
         return String(text.prefix(maxDraftLength))
+    }
+
+    // MARK: Asking before summarizing
+
+    /// A line of the key hints under the field.
+    public struct Hint: Sendable, Equatable {
+        public let key: String
+        public let label: String
+        public let spoken: String
+    }
+
+    /// The hints under the field. With nothing said yet ⌘↩ summarizes, so it leads.
+    public static func hints(chatIsEmpty: Bool) -> [Hint] {
+        var hints: [Hint] = []
+        if chatIsEmpty { hints.append(Hint(key: "⌘↩", label: "Summarize", spoken: "Command Return summarizes.")) }
+        hints += [
+            Hint(key: "esc", label: "Close", spoken: "Escape closes."),
+            Hint(key: "⇥", label: "Switch scope", spoken: "Tab switches between this one and the session."),
+            Hint(key: "⌘O", label: "Open in library", spoken: "Command O opens the library."),
+            Hint(key: "⌘C", label: "Copy answer", spoken: "Command C copies the answer."),
+        ]
+        return hints
+    }
+
+    /// ⌘↩ and the Summarize button only start a summary on an empty chat that is not busy or waiting for a capture.
+    public static func canSummarize(chatIsEmpty: Bool, busy: Bool, waiting: Bool) -> Bool {
+        chatIsEmpty && !busy && !waiting
+    }
+
+    /// What a held question says while its record is still being read.
+    public static func waitingLabel(isMedia: Bool) -> String {
+        isMedia ? "Waiting for the details…" : "Waiting for the transcript…"
+    }
+
+    /// Only a send in the session scope uses the open session up. A question about one record (the front tab, the
+    /// latest, a handed-in pin) leaves it open, so the next nab still joins it.
+    public static func sendUsesSession(scope: AskScope, pinned: Bool, count: Int) -> Bool {
+        scope == .session && !pinned && count > 0
+    }
+
+    public enum Resolution: Equatable, Sendable {
+        case send
+        case fail(String)
+    }
+
+    /// What becomes of a question held for a capture: it goes out once any record is ready, and the chat shows the
+    /// reason when none will be.
+    public static func resolveHeld(readyCount: Int, failure: String?, isMedia: Bool) -> Resolution {
+        if readyCount > 0 { return .send }
+        if let failure, !failure.isEmpty { return .fail(failure) }
+        let what = isMedia ? "details" : "transcript"
+        return .fail("The \(what) did not arrive. Try again in a moment.")
+    }
+
+    /// How long after a timecode click a mouse-down elsewhere is taken as part of that click's consequences (the
+    /// browser coming forward, a permission prompt, the player opening) and does not close the window.
+    public static let citationGrace: TimeInterval = 5
+
+    public static func closesOnOutsideClick(sinceCitation: TimeInterval?) -> Bool {
+        guard let sinceCitation else { return true }
+        return sinceCitation > citationGrace
     }
 }

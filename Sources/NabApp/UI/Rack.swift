@@ -16,7 +16,7 @@ final class RackController {
 
     init(
         center: CaptureCenter, anchor: @escaping () -> NSRect?, openLibrary: @escaping (String?) -> Void,
-        openSession: @escaping () -> Void, summarize: @escaping ([String]) -> Void
+        openSession: @escaping () -> Void, ask: @escaping ([String]) -> Void
     ) {
         self.center = center
         self.anchor = anchor
@@ -26,7 +26,7 @@ final class RackController {
         ) {
             RackView(
                 center: center, presentation: presentation, openLibrary: openLibrary, openSession: openSession,
-                summarize: summarize)
+                ask: ask)
         }
         observe { [weak self] in self?.sync() }
     }
@@ -126,7 +126,7 @@ private struct RackView: View {
     let presentation: RackPresentation
     let openLibrary: (String?) -> Void
     let openSession: () -> Void
-    let summarize: ([String]) -> Void
+    let ask: ([String]) -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Kept so the content stays while the window lifts out.
     @State private var lastToast: CaptureCenter.Toast?
@@ -173,7 +173,7 @@ private struct RackView: View {
                 shortcuts: RackText.hints(map: ShortcutStore.shared.map, unavailable: ShortcutStore.shared.unavailable)
                     .map(\.action),
                 copyAll: { center.copySession() },
-                askAI: { summarize(center.sessionSummaryIDs()) }
+                askAI: { ask(center.sessionSummaryIDs()) }
             )
             .onTapGesture {
                 center.dismissToast()

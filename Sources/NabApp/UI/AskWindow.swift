@@ -10,7 +10,9 @@ final class AskModel {
     var scope = AskScope.session
     var sessionIDs: [String] = []
     var latestID: String?
-    /// Videos handed in by a caller that are neither the session nor the latest one.
+    /// The record the shortcut just nabbed from the front tab; it stands in for "latest" even while it is still being read.
+    var focusID: String?
+    /// Records handed in by a caller that are neither the session nor the latest one.
     var pinned: [String]?
     var draft = ""
     /// Set when the window came from a link or with a draft: no summary goes out until the user asks for one.
@@ -24,10 +26,13 @@ final class AskModel {
     @ObservationIgnored var openSettings: () -> Void = {}
     @ObservationIgnored var ensureSummary: () -> Void = {}
     @ObservationIgnored var later: () -> Void = {}
+    @ObservationIgnored var summarize: () -> Void = {}
+    @ObservationIgnored var sent: () -> Void = {}
     @ObservationIgnored var setHeight: (CGFloat) -> Void = { _ in }
 
-    var ids: [String] { pinned ?? AskScope.ids(for: scope, session: sessionIDs, latest: latestID) }
-    var showsPicker: Bool { pinned == nil && AskScope.offersChoice(session: sessionIDs, latest: latestID) }
+    var latest: String? { focusID ?? latestID }
+    var ids: [String] { pinned ?? AskScope.ids(for: scope, session: sessionIDs, latest: latest) }
+    var showsPicker: Bool { pinned == nil && AskScope.offersChoice(session: sessionIDs, latest: latest) }
 }
 
 enum AskMetrics {
@@ -47,6 +52,8 @@ final class AskWindowController {
     private let openLibrary: ([String]) -> Void
     private let openVideo: (String, TimeInterval) -> Void
     private var monitors: [Any] = []
+    /// When a timecode was last followed; the clicks that its consequences cause elsewhere do not close the window.
+    private var lastCitation: Date?
 
     /// A window on its way out counts as closed, so a click or shortcut during the animation opens it again.
     var isVisible: Bool { panel.isVisible && !panel.isClosing }
@@ -73,19 +80,26 @@ final class AskWindowController {
             self?.model.choosing = false
             self?.close()
         }
+        model.summarize = { [weak self] in _ = self?.summarizeNow() }
+        model.sent = { [weak self] in self?.markUsed() }
         model.setHeight = { [weak self] in self?.panel.setHeight($0) }
     }
 
     /// Opens the window. `ids` come from a caller that already knows what to ask about; without them it opens on
     /// the session, or on the latest video when the session is empty. A link can come from any web page, so with
-    /// `holdsSummary` (and with a `draft`, which only fills the field) nothing is sent until the user asks.
-    func show(ids: [String]? = nil, draft: String? = nil, holdsSummary: Bool = false) {
+    /// `holdsSummary` (and with a `draft`, which only fills the field) nothing is sent until the user asks. A `focus`
+    /// is the record the shortcut nabbed from the front tab: the scope starts on it whatever the session holds.
+    func show(ids: [String]? = nil, focus: String? = nil, draft: String? = nil, holdsSummary: Bool = false) {
         refresh()
-        if let ids {
+        model.focusID = focus
+        if focus != nil {
+            model.scope = AskScope.initial(sessionIDs: model.sessionIDs, focus: focus)
+            model.pinned = nil
+        } else if let ids {
             if ids == model.sessionIDs {
                 model.scope = .session
                 model.pinned = nil
-            } else if ids == model.latestID.map({ [$0] }) {
+            } else if ids == model.latest.map({ [$0] }) {
                 model.scope = .latest
                 model.pinned = nil
             } else {
@@ -116,6 +130,12 @@ final class AskWindowController {
         panel.dismiss()
     }
 
+    /// A click outside closes the window, unless it is what following a timecode just caused: the browser coming
+    /// forward, the Automation prompt it can raise, the player or the library opening.
+    private func closeForOutsideClick() {
+        if AskScope.closesOnOutsideClick(sinceCitation: lastCitation.map { Date.now.timeIntervalSince($0) }) { close() }
+    }
+
     private func removeMonitors() {
         monitors.forEach(NSEvent.removeMonitor)
         monitors = []
@@ -124,6 +144,7 @@ final class AskWindowController {
     /// Follows a timecode from an answer: it plays through the router, or with ⌘ held opens the transcript in the
     /// library. The window stays where it is either way.
     func open(_ citation: Citation) {
+        lastCitation = .now
         let ids = model.ids
         let order = assistant.conversation(ids)?.entryIDs ?? ids
         let videos = order.compactMap { center.entry($0) }.filter { $0.capture != nil }
@@ -138,8 +159,8 @@ final class AskWindowController {
 
     private func refresh() {
         let ready = center.session.filter { $0.capture != nil }
-        // Asking about the session marks it used, as the summary shortcut always did.
-        model.sessionIDs = ready.isEmpty ? [] : center.sessionSummaryIDs()
+        // Opening the window uses nothing up: the session counts as used when something is sent about it.
+        model.sessionIDs = ready.map(\.id)
         model.latestID = AskScope.latestID(
             in: center.entries.map { AskScope.Candidate(id: $0.id, addedAt: $0.addedAt, hasCapture: $0.capture != nil) }
         )
@@ -156,9 +177,31 @@ final class AskWindowController {
             if assistant.needsProviderChoice {
                 model.choosing = true
             } else {
-                assistant.summarize(ids)
+                if assistant.summarize(ids) { markUsed() }
             }
         }
+    }
+
+    /// Something went out: in the session scope that uses the open session up, so the next nab starts a new one.
+    private func markUsed() {
+        let ids = model.ids
+        if AskScope.sendUsesSession(scope: model.scope, pinned: model.pinned != nil, count: ids.count) {
+            center.consumeSession()
+        }
+    }
+
+    /// ⌘↩ and the Summarize button: the one way a summary starts, and only on a chat with nothing in it.
+    @discardableResult
+    private func summarizeNow() -> Bool {
+        let ids = model.ids
+        guard !ids.isEmpty,
+            AskScope.canSummarize(
+                chatIsEmpty: assistant.conversation(ids)?.messages.isEmpty ?? true, busy: assistant.isStreaming(ids),
+                waiting: assistant.isWaiting(ids))
+        else { return true }
+        model.holdsSummary = false
+        ensureSummary()
+        return true
     }
 
     private func toggleScope() {
@@ -186,12 +229,12 @@ final class AskWindowController {
         removeMonitors()
         monitors.append(
             NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
-                MainActor.assumeIsolated { self?.close() }
+                MainActor.assumeIsolated { self?.closeForOutsideClick() }
             } as Any)
         monitors.append(
             NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
                 guard let self, event.window !== self.panel, !MiniPlayer.shared.owns(event.window) else { return event }
-                self.close()
+                self.closeForOutsideClick()
                 return event
             } as Any)
         monitors.append(
@@ -222,6 +265,8 @@ final class AskWindowController {
         case (kVK_ANSI_O, false):
             openInLibrary()
             return true
+        case (kVK_Return, false), (kVK_ANSI_KeypadEnter, false):
+            return summarizeNow()
         case (kVK_ANSI_C, false):
             if let field = panel.firstResponder as? NSTextView, field.selectedRange().length > 0 {
                 return NSApp.sendAction(#selector(NSText.copy(_:)), to: nil, from: nil)
@@ -257,7 +302,7 @@ struct AskView: View {
             answerCell(ids, messages: messages, busy: busy)
             hairline
             composer(ids, busy: busy)
-            hints
+            hints(chatIsEmpty: messages.isEmpty)
         }
         .padding(8)
         .frame(width: AskMetrics.width)
@@ -270,7 +315,6 @@ struct AskView: View {
         .frame(maxHeight: .infinity, alignment: .top)
         .environment(\.openURL, OpenURLAction(handler: cite))
         .task(id: ids) { await assistant.load(ids) }
-        .onChange(of: model.scope) { model.ensureSummary() }
         .onChange(of: model.focusRequest, initial: true) { composing = true }
     }
 
@@ -286,6 +330,11 @@ struct AskView: View {
 
     // MARK: Header
 
+    /// The other side of the picker names the record itself, so it reads right for a photo as for a video.
+    private var latestTitle: String {
+        model.latest.flatMap { center.entry($0)?.title }.map(AskScope.shortTitle) ?? "Latest"
+    }
+
     private func header(_ ids: [String]) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
@@ -293,7 +342,7 @@ struct AskView: View {
                     SegmentedPicker(
                         [
                             (value: AskScope.session, title: "Session · \(model.sessionIDs.count)"),
-                            (value: AskScope.latest, title: "Latest video"),
+                            (value: AskScope.latest, title: latestTitle),
                         ], selection: $model.scope)
                     Keycap("⇥")
                 }
@@ -363,14 +412,13 @@ struct AskView: View {
                     model.choosing = false
                     if !model.holdsSummary { model.ensureSummary() }
                 }, onLater: model.later, problem: assistant.client.problem)
+        } else if assistant.isWaiting(ids) {
+            ThinkingDots(label: assistant.waitingLabel(ids))
         } else if model.holdsSummary && !busy {
             VStack(alignment: .leading, spacing: Space.m) {
                 Text("Ask a question below, or start with a summary.")
                     .font(Typeface.body).foregroundStyle(Palette.inkSecondary)
-                NabButton("Summarize", kind: .primary) {
-                    model.holdsSummary = false
-                    model.ensureSummary()
-                }
+                NabButton("Summarize", kind: .primary) { model.summarize() }
             }
         } else {
             ThinkingDots(label: ids.count == 1 ? "Reading the transcript" : "Reading \(ids.count) transcripts")
@@ -380,15 +428,16 @@ struct AskView: View {
     // MARK: Composer
 
     private func composer(_ ids: [String], busy: Bool) -> some View {
+        let placeholder = (assistant.conversation(ids)?.messages.isEmpty ?? true) ? "Ask a question" : "Ask a follow-up"
         let canSend = !model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !ids.isEmpty
         return HStack(spacing: 8) {
-            TextField("Ask a follow-up", text: $model.draft)
+            TextField(placeholder, text: $model.draft)
                 .textFieldStyle(.plain)
                 .font(Typeface.body)
                 .foregroundStyle(Palette.ink)
                 .focused($composing)
                 .onSubmit { send(ids) }
-                .accessibilityLabel("Ask a follow-up")
+                .accessibilityLabel(placeholder)
             SendButton(stop: busy, enabled: busy || canSend, size: 32, neutralWhenIdle: true) {
                 busy ? assistant.stop(ids) : send(ids)
             }
@@ -404,24 +453,23 @@ struct AskView: View {
         guard !assistant.isStreaming(ids), !model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return
         }
-        if assistant.ask(model.draft, about: ids) { model.draft = "" }
+        if assistant.ask(model.draft, about: ids) {
+            model.draft = ""
+            model.sent()
+        }
     }
 
     // MARK: Hints
 
-    private var hints: some View {
-        HStack(spacing: 16) {
-            hint("esc", "Close")
-            hint("⇥", "Session or latest")
-            hint("⌘O", "Open in library")
-            hint("⌘C", "Copy answer")
+    private func hints(chatIsEmpty: Bool) -> some View {
+        let hints = AskScope.hints(chatIsEmpty: chatIsEmpty)
+        return HStack(spacing: 16) {
+            ForEach(hints, id: \.key) { hint($0.key, $0.label) }
         }
         .frame(maxWidth: .infinity)
         .frame(height: 20)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(
-            "Escape closes. Tab switches between the session and the latest video. Command O opens the library. Command C copies the answer."
-        )
+        .accessibilityLabel(hints.map(\.spoken).joined(separator: " "))
     }
 
     private func hint(_ key: String, _ label: String) -> some View {
