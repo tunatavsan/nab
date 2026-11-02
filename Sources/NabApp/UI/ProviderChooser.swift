@@ -150,10 +150,11 @@ struct ProviderChooser: View {
             }
             for await (kind, isReady) in group {
                 if isReady { ready.insert(kind) }
-                if selected == nil, isReady, kind == settings.kind || !ready.contains(settings.kind) { selected = kind }
             }
         }
         detected = true
+        // Decided once every check is in, by priority, not by whichever answered first.
+        if selected == nil { selected = ProviderPriority.preselected(ready: ready, current: settings.kind) }
         if selected == nil { selected = settings.kind }
     }
 
