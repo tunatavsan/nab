@@ -548,7 +548,7 @@ private struct TrayRow: View {
 
     private var statusText: String {
         switch entry.phase {
-        case .fetching: "Fetching captions…"
+        case .fetching, .saving: "Fetching captions…"
         case .failed: entry.failure ?? "Failed"
         case .ready: onClipboard ? "On clipboard" : entry.detailLine
         }
@@ -557,7 +557,7 @@ private struct TrayRow: View {
     @ViewBuilder private var status: some View {
         HStack(spacing: 5) {
             switch entry.phase {
-            case .fetching:
+            case .fetching, .saving:
                 LimeSpinner(size: 9)
                 Text(statusText).foregroundStyle(Palette.inkSecondary)
             case .failed:

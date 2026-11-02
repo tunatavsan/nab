@@ -10,13 +10,16 @@ let package = Package(
         .library(name: "NabCore", targets: ["NabCore"]),
         .library(name: "NabYouTube", targets: ["NabYouTube"]),
         .library(name: "NabAI", targets: ["NabAI"]),
+        .library(name: "NabSources", targets: ["NabSources"]),
     ],
     targets: [
         .target(name: "NabCore"),
         .target(name: "NabYouTube", dependencies: ["NabCore"]),
-        .executableTarget(name: "NabCLI", dependencies: ["NabCore", "NabYouTube"]),
+        // Every source Nab reads, listed once; the app and the CLI both take the list from here.
+        .target(name: "NabSources", dependencies: ["NabCore", "NabYouTube"]),
+        .executableTarget(name: "NabCLI", dependencies: ["NabCore", "NabSources"]),
         .target(name: "NabAI", dependencies: ["NabCore"]),
-        .executableTarget(name: "NabApp", dependencies: ["NabCore", "NabYouTube", "NabAI"]),
-        .testTarget(name: "NabTests", dependencies: ["NabCore", "NabYouTube", "NabAI"]),
+        .executableTarget(name: "NabApp", dependencies: ["NabCore", "NabYouTube", "NabAI", "NabSources"]),
+        .testTarget(name: "NabTests", dependencies: ["NabCore", "NabYouTube", "NabAI", "NabSources"]),
     ]
 )

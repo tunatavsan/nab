@@ -6,6 +6,7 @@ import NabCore
 /// watch-page download (verified 2026-10-11: player ≈ 0.4 s, captions ≈ 0.2 s).
 public struct YouTubeSource: SourceProvider {
     public let kind = SourceKind.youtube
+    public let name = "YouTube"
     private let session: URLSession
     /// The Android client version YouTube currently accepts. When YouTube retires it, only this
     /// value (and the user agent) changes.
@@ -144,34 +145,8 @@ public struct YouTubeSource: SourceProvider {
         )
     }
 
-    /// Both requests usually answer in 0.2–0.4 s, but now and then one stalls for ~10 s (measured
-    /// 2026-10-11, in the CLI and the app alike). If no answer has come after `delay`, the same request
-    /// goes out again on a fresh connection and whichever answers first wins. The 450 ms default sits
-    /// above the normal answer time and below the stalls (2026-10-15: timedtext p50 0.24 s, and 4 of 20
-    /// cold requests stalled 1.3–10.3 s; player max 0.37 s), so a healthy request is rarely doubled.
-    private func hedged(_ request: URLRequest, delay: Duration = .milliseconds(450)) async throws -> (
-        Data, URLResponse
-    ) {
-        let session = session
-        return try await withThrowingTaskGroup(of: (Data, URLResponse).self) { group in
-            group.addTask { try await session.data(for: request) }
-            group.addTask {
-                try await Task.sleep(for: delay)
-                return try await URLSession.nabHedge.data(for: request)
-            }
-            defer { group.cancelAll() }
-            var lastError: Error = NabError("YouTube did not answer.")
-            for _ in 0..<2 {
-                do {
-                    if let result = try await group.next() { return result }
-                } catch is CancellationError {
-                    continue
-                } catch {
-                    lastError = error
-                }
-            }
-            throw lastError
-        }
+    private func hedged(_ request: URLRequest) async throws -> (Data, URLResponse) {
+        try await session.hedgedData(for: request, silence: "YouTube did not answer.")
     }
 
     private static func check(_ response: URLResponse, _ what: String) throws {
@@ -181,20 +156,6 @@ public struct YouTubeSource: SourceProvider {
             throw NabError("YouTube refused the \(what) request (HTTP \(http.statusCode)).")
         }
     }
-}
-
-extension URLSession {
-    /// One shared session: keeps connections to youtube.com warm across a batch.
-    public static let nab: URLSession = {
-        let config = URLSessionConfiguration.ephemeral
-        config.httpMaximumConnectionsPerHost = 6
-        config.timeoutIntervalForRequest = 15
-        config.httpAdditionalHeaders = ["Accept-Language": "en"]
-        return URLSession(configuration: config)
-    }()
-
-    /// A second pool, so a hedged retry never waits behind the connection that stalled.
-    static let nabHedge: URLSession = URLSession(configuration: nab.configuration)
 }
 
 public enum YouTubeURL {

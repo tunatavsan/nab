@@ -3,7 +3,8 @@ import Foundation
 
 /// One link in the library and how far Nab got with it.
 public struct Entry: Codable, Sendable, Hashable, Identifiable {
-    public enum Phase: Sendable { case fetching, ready, failed }
+    /// `saving`: the details are in and a photo or clip is still being written to disk.
+    public enum Phase: Sendable { case fetching, saving, ready, failed }
 
     public let id: String
     public var url: URL
@@ -43,7 +44,14 @@ public struct Entry: Codable, Sendable, Hashable, Identifiable {
     public var source: SourceKind { SourceKind(rawValue: String(id.prefix { $0 != ":" })) }
     public var sourceID: String { String(id.drop { $0 != ":" }.dropFirst()) }
 
-    public var phase: Phase { capture != nil ? .ready : failure != nil ? .failed : .fetching }
+    /// Worked out from what is stored, so no flag can disagree with the files: no capture yet is fetching (or failed),
+    /// a capture with an unsaved photo or clip is saving (or failed, when the save did), anything else is ready.
+    /// Whether a saved file is still on disk is checked where it is used, not here.
+    public var phase: Phase {
+        guard let capture else { return failure != nil ? .failed : .fetching }
+        guard capture.media.contains(where: { $0.savedPath == nil }) else { return .ready }
+        return failure != nil ? .failed : .saving
+    }
     public var title: String { capture?.title ?? provisionalTitle ?? url.absoluteString }
 }
 

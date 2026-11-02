@@ -1,0 +1,99 @@
+import Foundation
+import Testing
+
+@testable import NabCore
+
+/// Answers requests from a table instead of the network: a status and a body per path, or no answer at all.
+final class MediaStub: URLProtocol, @unchecked Sendable {
+    struct Reply: Sendable {
+        var status: Int
+        var body: Data
+    }
+    nonisolated(unsafe) private static var replies: [String: [Reply]] = [:]
+    nonisolated(unsafe) private static var counts: [String: Int] = [:]
+    private static let lock = NSLock()
+
+    static func set(_ path: String, _ replies: [Reply]) { lock.withLock { self.replies[path] = replies } }
+    static func count(_ path: String) -> Int { lock.withLock { counts[path, default: 0] } }
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        let path = request.url?.path() ?? ""
+        let reply: Reply? = Self.lock.withLock {
+            Self.counts[path, default: 0] += 1
+            guard var list = Self.replies[path], !list.isEmpty else { return nil }
+            let first = list.removeFirst()
+            if !list.isEmpty { Self.replies[path] = list }
+            return first
+        }
+        guard let reply else { return }  // never answers: a stalled transfer
+        let response = HTTPURLResponse(
+            url: request.url!, statusCode: reply.status, httpVersion: "HTTP/1.1",
+            headerFields: ["Content-Length": "\(reply.body.count)"])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: reply.body)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+}
+
+@Suite("Saving photos and clips")
+struct DownloaderTests {
+    let folder = FileManager.default.temporaryDirectory.appending(path: "nab-dl-\(UUID().uuidString)")
+
+    func downloader() -> MediaDownloader {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [MediaStub.self]
+        return MediaDownloader(session: URLSession(configuration: config), limit: 2, backoff: .milliseconds(1))
+    }
+
+    func leftovers() -> [String] {
+        ((try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []).sorted()
+    }
+
+    @Test func savesUnderTheRealNameOnlyWhenComplete() async throws {
+        let body = Data((0..<200_000).map { UInt8($0 % 251) })
+        MediaStub.set("/ok.png", [.init(status: 200, body: body)])
+        let file = folder.appending(path: "Lamp (Pinterest 1).png")
+        let size = try await downloader().download(URL(string: "https://media.example/ok.png")!, to: file)
+        #expect(size == Int64(body.count))
+        #expect(try Data(contentsOf: file) == body)
+        #expect(leftovers() == ["Lamp (Pinterest 1).png"])
+    }
+
+    @Test func refusalLeavesNothingAndSaysWhy() async throws {
+        MediaStub.set("/gone.png", [.init(status: 403, body: Data("<Error/>".utf8))])
+        let file = folder.appending(path: "x.png")
+        await #expect(throws: HTTPStatusError(status: 403)) {
+            _ = try await downloader().download(URL(string: "https://media.example/gone.png")!, to: file)
+        }
+        #expect(leftovers().isEmpty)
+    }
+
+    @Test func busyServersAreAskedAgainThenGivenUpOn() async throws {
+        MediaStub.set("/busy.mp4", [.init(status: 429, body: Data()), .init(status: 200, body: Data("ok".utf8))])
+        let file = folder.appending(path: "busy.mp4")
+        _ = try await downloader().download(URL(string: "https://media.example/busy.mp4")!, to: file)
+        #expect(MediaStub.count("/busy.mp4") == 2)
+        MediaStub.set("/down.mp4", Array(repeating: .init(status: 503, body: Data()), count: 5))
+        await #expect(throws: HTTPStatusError(status: 503)) {
+            _ = try await downloader().download(
+                URL(string: "https://media.example/down.mp4")!, to: folder.appending(path: "down.mp4"))
+        }
+        #expect(MediaStub.count("/down.mp4") == 3)
+    }
+
+    @Test(.timeLimit(.minutes(1))) func cancellingStopsTheTransferAndLeavesNoPartialFile() async throws {
+        let file = folder.appending(path: "stalled.mp4")
+        let loader = downloader()
+        let task = Task { try await loader.download(URL(string: "https://media.example/stalled.mp4")!, to: file) }
+        try await Task.sleep(for: .milliseconds(150))
+        task.cancel()
+        await #expect(throws: (any Error).self) { _ = try await task.value }
+        #expect(leftovers().isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: MediaDownloader.partialFile(for: file).path))
+    }
+}

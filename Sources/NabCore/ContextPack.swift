@@ -24,15 +24,24 @@ public enum ContextPack {
         out += "# \(inert(c.title))\n\n"
         if let cover = c.thumbnailURL { out += "![Cover](\(cover.absoluteString))\n\n" }
         var facts: [String] = []
-        if let author = c.author { facts.append("Channel: \(inert(author))") }
+        if let author = c.author { facts.append("\(c.isMedia ? "By" : "Channel"): \(inert(author))") }
         if let duration = c.duration { facts.append("Duration: \(Timecode.string(duration))") }
         if let views = c.viewCount { facts.append("Views: \(views.formatted())") }
         if let t = c.transcript {
             facts.append("Transcript: \(t.languageName ?? t.languageCode)\(t.isGenerated ? ", auto-generated" : "")")
+        } else if c.isMedia {
+            facts.append("Media: \(RackText.count(Tally(c.media)))")
         } else {
             facts.append("Transcript: none available")
         }
         out += facts.map { "- \($0)" }.joined(separator: "\n") + "\n"
+        if c.isMedia {
+            // Each file as the user has it: the saved copy when there is one, else where the source keeps it.
+            out += "\n## Media\n"
+            out +=
+                c.media.map { "- \(RackText.mediaLine($0)) · \(inert($0.savedPath ?? $0.url.absoluteString))" }
+                .joined(separator: "\n") + "\n"
+        }
 
         if let ai = c.aiSummary?.trimmingCharacters(in: .whitespacesAndNewlines), !ai.isEmpty {
             out += "\n## Summary\(c.aiModel.map { " (by \(inert($0)))" } ?? "")\n\(inert(ai))\n"

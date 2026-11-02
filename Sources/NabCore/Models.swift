@@ -25,6 +25,9 @@ public struct Capture: Codable, Sendable, Hashable {
     public var thumbnailURL: URL?
     public var chapters: [Chapter]
     public var transcript: Transcript?
+    /// The photos and clips this item is made of, in order, once the source has picked the best copy of each.
+    /// Empty for a video read as a transcript.
+    public var media: [Media]
     /// A summary written by the user's chosen AI model, and which model wrote it.
     public var aiSummary: String?
     public var aiModel: String?
@@ -32,7 +35,8 @@ public struct Capture: Codable, Sendable, Hashable {
     public init(
         source: SourceKind, sourceID: String, url: URL, title: String, author: String? = nil,
         authorURL: URL? = nil, duration: TimeInterval? = nil, viewCount: Int? = nil, summary: String? = nil,
-        keywords: [String] = [], thumbnailURL: URL? = nil, chapters: [Chapter] = [], transcript: Transcript? = nil
+        keywords: [String] = [], thumbnailURL: URL? = nil, chapters: [Chapter] = [], transcript: Transcript? = nil,
+        media: [Media] = []
     ) {
         self.source = source
         self.sourceID = sourceID
@@ -47,7 +51,63 @@ public struct Capture: Codable, Sendable, Hashable {
         self.thumbnailURL = thumbnailURL
         self.chapters = chapters
         self.transcript = transcript
+        self.media = media
     }
+
+    /// Written by hand only so files saved before `media` existed still open: a missing list is an empty one.
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        source = try c.decode(SourceKind.self, forKey: .source)
+        sourceID = try c.decode(String.self, forKey: .sourceID)
+        url = try c.decode(URL.self, forKey: .url)
+        title = try c.decode(String.self, forKey: .title)
+        author = try c.decodeIfPresent(String.self, forKey: .author)
+        authorURL = try c.decodeIfPresent(URL.self, forKey: .authorURL)
+        duration = try c.decodeIfPresent(TimeInterval.self, forKey: .duration)
+        viewCount = try c.decodeIfPresent(Int.self, forKey: .viewCount)
+        summary = try c.decodeIfPresent(String.self, forKey: .summary)
+        keywords = try c.decode([String].self, forKey: .keywords)
+        thumbnailURL = try c.decodeIfPresent(URL.self, forKey: .thumbnailURL)
+        chapters = try c.decode([Chapter].self, forKey: .chapters)
+        transcript = try c.decodeIfPresent(Transcript.self, forKey: .transcript)
+        media = try c.decodeIfPresent([Media].self, forKey: .media) ?? []
+        aiSummary = try c.decodeIfPresent(String.self, forKey: .aiSummary)
+        aiModel = try c.decodeIfPresent(String.self, forKey: .aiModel)
+    }
+
+    /// A media item: its photos and clips are what the user keeps. A text item: its transcript is.
+    /// The interface asks these, never the source.
+    public var isMedia: Bool { !media.isEmpty }
+}
+
+/// One photo or clip of an item: where the source's best copy lives and, once Nab has saved it, where it is on disk.
+public struct Media: Codable, Sendable, Hashable {
+    public enum Kind: String, Codable, Sendable { case image, video }
+
+    public var kind: Kind
+    /// The best copy the source offers.
+    public var url: URL
+    public var width: Int?
+    public var height: Int?
+    public var duration: TimeInterval?
+    /// The absolute path of the saved file; nil until it is saved.
+    public var savedPath: String?
+    public var byteCount: Int64?
+
+    public init(
+        kind: Kind, url: URL, width: Int? = nil, height: Int? = nil, duration: TimeInterval? = nil,
+        savedPath: String? = nil, byteCount: Int64? = nil
+    ) {
+        self.kind = kind
+        self.url = url
+        self.width = width
+        self.height = height
+        self.duration = duration
+        self.savedPath = savedPath
+        self.byteCount = byteCount
+    }
+
+    public var savedURL: URL? { savedPath.map { URL(filePath: $0) } }
 }
 
 public struct Chapter: Codable, Sendable, Hashable {

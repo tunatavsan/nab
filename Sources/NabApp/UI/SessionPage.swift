@@ -163,7 +163,7 @@ private struct SourceCard: View {
 
     private var detail: String {
         switch entry.phase {
-        case .fetching: return "Fetching transcript…"
+        case .fetching, .saving: return "Fetching transcript…"
         case .failed: return entry.failure ?? "Could not be read"
         case .ready:
             let language = entry.capture?.transcript.map { $0.languageName ?? $0.languageCode } ?? "No captions"

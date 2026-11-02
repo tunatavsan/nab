@@ -218,7 +218,7 @@ struct Thumbnail: View {
                 Image(nsImage: image).resizable().aspectRatio(contentMode: .fill).transition(.opacity)
             }
             switch entry.phase {
-            case .fetching:
+            case .fetching, .saving:
                 Palette.scrim
                 ProgressView().controlSize(.mini).tint(Palette.onScrim)
             case .failed:
@@ -654,7 +654,7 @@ struct PhaseMark: View {
     var body: some View {
         ZStack {
             switch phase {
-            case .fetching:
+            case .fetching, .saving:
                 Circle().fill(Palette.accent).frame(width: 6, height: 6)
                     .pulsing(low: 0.35, duration: 0.7)
             case .failed:
@@ -671,7 +671,7 @@ struct PhaseMark: View {
 extension Entry {
     var metaLine: String {
         switch phase {
-        case .fetching: return "Fetching transcript…"
+        case .fetching, .saving: return "Fetching transcript…"
         case .failed: return failure ?? "Failed"
         case .ready:
             var parts: [String] = []

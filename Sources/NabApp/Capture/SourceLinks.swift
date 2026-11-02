@@ -1,11 +1,6 @@
 import Foundation
 import NabCore
-import NabYouTube
-
-extension SourceRegistry {
-    /// The sources the app reads. Everything source-specific the interface shows comes through here.
-    static let standard = SourceRegistry([YouTubeSource()])
-}
+import NabSources
 
 extension Entry {
     /// Cover images, largest first.
@@ -24,7 +19,5 @@ extension Capture {
 
 extension SourceKind {
     /// How the interface names a source; `rawValue` is the stable id used in files.
-    var displayName: String {
-        self == .youtube ? "YouTube" : rawValue.capitalized
-    }
+    var displayName: String { SourceRegistry.standard.name(for: self) }
 }

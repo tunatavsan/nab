@@ -128,7 +128,7 @@ private struct VideoContent: View {
 
     @ViewBuilder private var status: some View {
         switch entry.phase {
-        case .fetching:
+        case .fetching, .saving:
             HStack(spacing: Space.s) {
                 PhaseMark(phase: .fetching)
                 Text("Fetching transcript…")
@@ -180,7 +180,7 @@ private struct VideoContent: View {
                 }
             case .failed:
                 NabButton("Try again", kind: .primary, size: .large, fullWidth: true) { model.center.retry(entry.id) }
-            case .fetching:
+            case .fetching, .saving:
                 EmptyView()
             }
         }
@@ -486,7 +486,7 @@ private struct VideoContent: View {
     @ViewBuilder private var emptyBody: some View {
         VStack(spacing: Space.m) {
             switch entry.phase {
-            case .fetching:
+            case .fetching, .saving:
                 ProgressView().controlSize(.small)
                 Text("Fetching transcript…").font(Typeface.body).foregroundStyle(Palette.inkSecondary)
             case .failed:

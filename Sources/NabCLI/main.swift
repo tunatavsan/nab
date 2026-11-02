@@ -1,6 +1,6 @@
 import Foundation
 import NabCore
-import NabYouTube
+import NabSources
 
 // nab <link>... — fetches every link in parallel and prints one context pack to stdout.
 // The same core the app uses, so agents can read videos without the UI.
@@ -19,7 +19,7 @@ if input.isEmpty || arguments.contains("--help") {
     exit(input.isEmpty && !arguments.contains("--help") ? 64 : 0)
 }
 
-let registry = SourceRegistry([YouTubeSource()])
+let registry = SourceRegistry.standard
 let urls = registry.links(in: input.joined(separator: "\n"))
 if urls.isEmpty {
     FileHandle.standardError.write(Data("nab: no supported links found\n".utf8))

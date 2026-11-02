@@ -26,6 +26,48 @@ public enum RackText {
         "\(count) video\(count == 1 ? "" : "s")"
     }
 
+    /// "2 videos and 3 photos", "4 photos", "1 video": every kind there is, in a fixed order.
+    public static func count(_ tally: Tally) -> String {
+        let parts = [
+            noun(tally.videos, "video"), noun(tally.photos, "photo"), noun(tally.items, "item"),
+        ].compactMap { $0 }
+        return parts.isEmpty ? "0 items" : list(parts)
+    }
+
+    /// "Copied 4 photos".
+    public static func copied(_ tally: Tally) -> String { "Copied \(count(tally))" }
+
+    /// One photo or clip: "Photo · 2400×3600", "Video · 1080×1920 · 0:42".
+    public static func mediaLine(_ media: Media) -> String {
+        var parts = [media.kind == .video ? "Video" : "Photo"]
+        if let w = media.width, let h = media.height { parts.append("\(w)×\(h)") }
+        if let d = media.duration { parts.append(Timecode.string(d)) }
+        return parts.joined(separator: " · ")
+    }
+
+    /// The kind line on a card for an item made of photos and clips: "Photo · 2400×3600", "Video · 0:42",
+    /// "4 photos", or "Saving… 42%" while its files arrive. Nil for an item read as text, whose card says more.
+    public static func kindLine(_ capture: Capture, saving progress: Double? = nil) -> String? {
+        guard capture.isMedia else { return nil }
+        if let progress { return "Saving… \(Int((min(max(progress, 0), 1) * 100).rounded(.down)))%" }
+        guard capture.media.count == 1, let only = capture.media.first else { return count(Tally(capture.media)) }
+        if only.kind == .video, let d = only.duration ?? capture.duration { return "Video · \(Timecode.string(d))" }
+        return mediaLine(only)
+    }
+
+    /// "Nab reads YouTube and Pinterest links."
+    public static func supportedSources(_ names: [String]) -> String {
+        "Nab reads \(list(names)) links."
+    }
+
+    /// "a", "a and b", "a, b and c".
+    public static func list(_ items: [String]) -> String {
+        guard items.count > 1 else { return items.first ?? "" }
+        return items.dropLast().joined(separator: ", ") + " and " + items[items.count - 1]
+    }
+
+    private static func noun(_ n: Int, _ word: String) -> String? { n > 0 ? "\(n) \(word)\(n == 1 ? "" : "s")" : nil }
+
     /// About one token per four characters, the same rule the context pack uses.
     public static func estimatedTokens(characters: Int) -> Int { characters / 4 }
 
@@ -65,5 +107,47 @@ public enum RackText {
     /// The line under "Session · 3 videos" on the stacked card.
     public static func stackSubtitle(copied: Bool) -> String {
         copied ? "Latest one is on your clipboard" : "Copy all puts them on your clipboard"
+    }
+}
+
+/// How many of each kind a set of items holds. An item read as text is a video; an item made of photos and clips
+/// counts each of them; an item still being fetched is an item.
+public struct Tally: Equatable, Sendable {
+    public var videos = 0
+    public var photos = 0
+    public var items = 0
+
+    public init(videos: Int = 0, photos: Int = 0, items: Int = 0) {
+        self.videos = videos
+        self.photos = photos
+        self.items = items
+    }
+
+    public init(_ media: [Media]) {
+        for m in media {
+            if m.kind == .video { videos += 1 } else { photos += 1 }
+        }
+    }
+
+    public init(_ entries: [Entry]) {
+        for entry in entries {
+            guard let capture = entry.capture else {
+                items += 1
+                continue
+            }
+            if capture.isMedia { self = self + Tally(capture.media) } else { videos += 1 }
+        }
+    }
+
+    public init(captures: [Capture]) {
+        for capture in captures {
+            if capture.isMedia { self = self + Tally(capture.media) } else { videos += 1 }
+        }
+    }
+
+    public var total: Int { videos + photos + items }
+
+    public static func + (a: Tally, b: Tally) -> Tally {
+        Tally(videos: a.videos + b.videos, photos: a.photos + b.photos, items: a.items + b.items)
     }
 }
