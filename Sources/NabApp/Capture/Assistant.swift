@@ -184,13 +184,23 @@ final class Assistant {
         guard !streaming.contains(id), waiting[id] == nil else { return false }
         let captures = entryIDs.compactMap { center.entry($0)?.capture }
         let reading = entryIDs.contains { center.entry($0)?.phase == .fetching }
-        guard !captures.isEmpty || reading else { return false }
+        let plan = AskScope.sendPlan(
+            readyCount: captures.count, reading: reading,
+            failure: entryIDs.compactMap { center.entry($0)?.failure }.first)
+        switch plan {
+        case .refuse: return false
+        case .fail(let reason):
+            // A record that could not be read says so in the chat, whatever the provider.
+            showFailure(question, for: entryIDs, reason)
+            return true
+        case .hold, .send: break
+        }
         let client = client
         if client.problem != nil {
             if opensSettings { openSettings() }
             return false
         }
-        guard !captures.isEmpty else {
+        if plan == .hold {
             hold(question, for: entryIDs)
             return true
         }
@@ -255,21 +265,30 @@ final class Assistant {
         let failure = entryIDs.compactMap { center.entry($0)?.failure }.first
         switch AskScope.resolveHeld(readyCount: ready.count, failure: failure) {
         case .send:
-            send(question, to: entryIDs)
+            // Nothing opens in the background: a provider that cannot answer is one line in the chat.
+            if !send(question, to: entryIDs, opensSettings: false) {
+                showFailure(question, for: entryIDs, client.problem ?? "The question could not be sent.")
+            }
         case .fail(let reason):
-            var conversation = byID[id] ?? Conversation(entryIDs: entryIDs)
-            conversation.messages.append(question)
-            conversation.messages.append(ChatMessage(role: .assistant, text: reason, failed: true))
-            conversation.updatedAt = .now
-            byID[id] = conversation
-            reindex()
-            let store = center.store
-            Task { [center] in
-                do {
-                    try await store.save(conversation)
-                } catch {
-                    center.report(error, while: "saving the chat")
-                }
+            showFailure(question, for: entryIDs, reason)
+        }
+    }
+
+    /// The question and a failed answer that says why nothing went out.
+    private func showFailure(_ question: ChatMessage, for entryIDs: [String], _ reason: String) {
+        let id = Conversation.id(for: entryIDs)
+        var conversation = byID[id] ?? Conversation(entryIDs: entryIDs)
+        conversation.messages.append(question)
+        conversation.messages.append(ChatMessage(role: .assistant, text: reason, failed: true))
+        conversation.updatedAt = .now
+        byID[id] = conversation
+        reindex()
+        let store = center.store
+        Task { [center] in
+            do {
+                try await store.save(conversation)
+            } catch {
+                center.report(error, while: "saving the chat")
             }
         }
     }

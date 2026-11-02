@@ -15,4 +15,9 @@ import Testing
     @Test func nothingReadyPreselectsNothing() {
         #expect(ProviderPriority.preselected(ready: [], current: .claudeCLI) == nil)
     }
+
+    @Test func preselectionFollowsTheChoosersOwnOrder() {
+        #expect(ProviderPriority.order == ProviderKind.common + ProviderKind.more)
+        #expect(ProviderPriority.preselected(ready: [.openRouter, .ollama], current: .claudeCLI) == .ollama)
+    }
 }

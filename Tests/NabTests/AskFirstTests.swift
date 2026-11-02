@@ -59,4 +59,32 @@ import Testing
         #expect(!AskScope.closesOnOutsideClick(sinceCitation: 1))
         #expect(AskScope.closesOnOutsideClick(sinceCitation: AskScope.citationGrace + 1))
     }
+
+    @Test func aRecordThatCouldNotBeReadShowsWhyInsteadOfWaiting() {
+        #expect(AskScope.sendPlan(readyCount: 0, reading: false, failure: "No captions.") == .fail("No captions."))
+        #expect(AskScope.sendPlan(readyCount: 0, reading: false, failure: nil) == .refuse)
+        #expect(AskScope.sendPlan(readyCount: 1, reading: true, failure: nil) == .hold)
+        #expect(AskScope.sendPlan(readyCount: 1, reading: false, failure: "x") == .send)
+    }
+
+    @Test func anEmptyChatShowsSummarizeWhateverHeldTheAutoSend() {
+        #expect(AskScope.emptyState(choosing: false, providerProblem: false, waiting: false, busy: false) == .summarize)
+        #expect(AskScope.emptyState(choosing: false, providerProblem: false, waiting: true, busy: false) == .waiting)
+        #expect(AskScope.emptyState(choosing: false, providerProblem: false, waiting: false, busy: true) == .reading)
+        #expect(AskScope.emptyState(choosing: true, providerProblem: false, waiting: true, busy: false) == .chooser)
+        #expect(AskScope.emptyState(choosing: false, providerProblem: true, waiting: false, busy: false) == .chooser)
+    }
+
+    @Test func handedIdsFindTheLiveSessionEvenWithRecordsStillBeingRead() {
+        // The session holds the front tab's record (still fetching) and one ready record.
+        let session = ["front", "a"]
+        #expect(
+            AskScope.placement(handed: ["front", "a"], session: session, readySession: ["a"], latest: "front")
+                == .session)
+        #expect(AskScope.placement(handed: ["a"], session: session, readySession: ["a"], latest: "front") == .session)
+        #expect(
+            AskScope.placement(handed: ["front"], session: session, readySession: ["a"], latest: "front") == .latest)
+        #expect(AskScope.placement(handed: ["z"], session: session, readySession: ["a"], latest: "front") == .pinned)
+        #expect(AskScope.offersChoice(session: session, latest: "front"))
+    }
 }

@@ -8,7 +8,10 @@ import SwiftUI
 @MainActor @Observable
 final class AskModel {
     var scope = AskScope.session
-    var sessionIDs: [String] = []
+    /// The open session's records, read live: still-fetching ones and the front tab's record are in it, and it
+    /// follows the session as captures land. Reading it in a view body tracks the session.
+    @ObservationIgnored var session: () -> [String] = { [] }
+    var sessionIDs: [String] { session() }
     var latestID: String?
     /// The record the shortcut just nabbed from the front tab; it stands in for "latest" even while it is still being read.
     var focusID: String?
@@ -27,7 +30,7 @@ final class AskModel {
     @ObservationIgnored var ensureSummary: () -> Void = {}
     @ObservationIgnored var later: () -> Void = {}
     @ObservationIgnored var summarize: () -> Void = {}
-    @ObservationIgnored var sent: () -> Void = {}
+    @ObservationIgnored var sent: (AskScope, Bool, Int) -> Void = { _, _, _ in }
     @ObservationIgnored var setHeight: (CGFloat) -> Void = { _ in }
 
     var latest: String? { focusID ?? latestID }
@@ -81,7 +84,8 @@ final class AskWindowController {
             self?.close()
         }
         model.summarize = { [weak self] in _ = self?.summarizeNow() }
-        model.sent = { [weak self] in self?.markUsed() }
+        model.sent = { [weak self] scope, pinned, count in self?.markUsed(scope: scope, pinned: pinned, count: count) }
+        model.session = { center.session.filter { $0.phase != .failed }.map(\.id) }
         model.setHeight = { [weak self] in self?.panel.setHeight($0) }
     }
 
@@ -96,13 +100,16 @@ final class AskWindowController {
             model.scope = AskScope.initial(sessionIDs: model.sessionIDs, focus: focus)
             model.pinned = nil
         } else if let ids {
-            if ids == model.sessionIDs {
+            let ready = model.sessionIDs.filter { center.entry($0)?.capture != nil }
+            switch AskScope.placement(handed: ids, session: model.sessionIDs, readySession: ready, latest: model.latest)
+            {
+            case .session:
                 model.scope = .session
                 model.pinned = nil
-            } else if ids == model.latest.map({ [$0] }) {
+            case .latest:
                 model.scope = .latest
                 model.pinned = nil
-            } else {
+            case .pinned:
                 model.pinned = ids
             }
         } else {
@@ -158,9 +165,7 @@ final class AskWindowController {
     }
 
     private func refresh() {
-        let ready = center.session.filter { $0.capture != nil }
         // Opening the window uses nothing up: the session counts as used when something is sent about it.
-        model.sessionIDs = ready.map(\.id)
         model.latestID = AskScope.latestID(
             in: center.entries.map { AskScope.Candidate(id: $0.id, addedAt: $0.addedAt, hasCapture: $0.capture != nil) }
         )
@@ -171,21 +176,28 @@ final class AskWindowController {
     private func ensureSummary() {
         let ids = model.ids
         guard !ids.isEmpty, !model.holdsSummary else { return }
+        // What the summary is about is fixed now; the chat may load for a while.
+        let scope = model.scope
+        let pinned = model.pinned != nil
         Task {
             await assistant.load(ids)
             guard assistant.conversation(ids)?.messages.isEmpty ?? true else { return }
             if assistant.needsProviderChoice {
                 model.choosing = true
             } else {
-                if assistant.summarize(ids) { markUsed() }
+                if assistant.summarize(ids) {
+                    markUsed(scope: scope, pinned: pinned, count: ids.count)
+                } else {
+                    // Nothing went out: the Summarize view comes back instead of a wait that never ends.
+                    model.holdsSummary = true
+                }
             }
         }
     }
 
     /// Something went out: in the session scope that uses the open session up, so the next nab starts a new one.
-    private func markUsed() {
-        let ids = model.ids
-        if AskScope.sendUsesSession(scope: model.scope, pinned: model.pinned != nil, count: ids.count) {
+    private func markUsed(scope: AskScope, pinned: Bool, count: Int) {
+        if AskScope.sendUsesSession(scope: scope, pinned: pinned, count: count) {
             center.consumeSession()
         }
     }
@@ -407,22 +419,28 @@ struct AskView: View {
                 message: answer, isLast: answer.id == messages.last?.id,
                 streaming: busy && answer.id == messages.last?.id,
                 assistant: assistant, entryIDs: ids, showsActions: false)
-        } else if model.choosing || assistant.client.problem != nil {
-            ProviderChooser(
-                onChosen: {
-                    model.choosing = false
-                    if !model.holdsSummary { model.ensureSummary() }
-                }, onLater: model.later, problem: assistant.client.problem)
-        } else if assistant.isWaiting(ids) {
-            ThinkingDots(label: AskScope.waitingLabel)
-        } else if model.holdsSummary && !busy {
-            VStack(alignment: .leading, spacing: Space.m) {
-                Text("Ask a question below, or start with a summary.")
-                    .font(Typeface.body).foregroundStyle(Palette.inkSecondary)
-                NabButton("Summarize", kind: .primary) { model.summarize() }
-            }
         } else {
-            ThinkingDots(label: ids.count == 1 ? "Reading the transcript" : "Reading \(ids.count) transcripts")
+            switch AskScope.emptyState(
+                choosing: model.choosing, providerProblem: assistant.client.problem != nil,
+                waiting: assistant.isWaiting(ids), busy: busy)
+            {
+            case .chooser:
+                ProviderChooser(
+                    onChosen: {
+                        model.choosing = false
+                        if !model.holdsSummary { model.ensureSummary() }
+                    }, onLater: model.later, problem: assistant.client.problem)
+            case .waiting:
+                ThinkingDots(label: AskScope.waitingLabel)
+            case .reading:
+                ThinkingDots(label: ids.count == 1 ? "Reading the transcript" : "Reading \(ids.count) transcripts")
+            case .summarize:
+                VStack(alignment: .leading, spacing: Space.m) {
+                    Text("Ask a question below, or start with a summary.")
+                        .font(Typeface.body).foregroundStyle(Palette.inkSecondary)
+                    NabButton("Summarize", kind: .primary) { model.summarize() }
+                }
+            }
         }
     }
 
@@ -454,9 +472,10 @@ struct AskView: View {
         guard !assistant.isStreaming(ids), !model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return
         }
+        let (scope, pinned) = (model.scope, model.pinned != nil)
         if assistant.ask(model.draft, about: ids) {
             model.draft = ""
-            model.sent()
+            model.sent(scope, pinned, ids.count)
         }
     }
 

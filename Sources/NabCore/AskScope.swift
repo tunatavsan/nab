@@ -130,6 +130,48 @@ public enum AskScope: Sendable, Hashable {
         return .fail("The details did not arrive. Try again in a moment.")
     }
 
+    /// What `send` does with a question about records in these states.
+    public enum SendPlan: Equatable, Sendable {
+        case send
+        /// A record is still being read: the question waits for it.
+        case hold
+        /// Nothing can be read and the fetch failed: the chat shows why.
+        case fail(String)
+        /// Nothing to read and nothing coming.
+        case refuse
+    }
+
+    public static func sendPlan(readyCount: Int, reading: Bool, failure: String?) -> SendPlan {
+        if reading { return .hold }
+        if readyCount > 0 { return .send }
+        if let failure, !failure.isEmpty { return .fail(failure) }
+        return .refuse
+    }
+
+    /// What an empty chat shows. It follows the chat's own state; whether a summary may start by itself is a
+    /// separate matter (`holdsSummary`).
+    public enum EmptyState: Equatable, Sendable {
+        case chooser, waiting, reading, summarize
+    }
+
+    public static func emptyState(choosing: Bool, providerProblem: Bool, waiting: Bool, busy: Bool) -> EmptyState {
+        if choosing || providerProblem { return .chooser }
+        if waiting { return .waiting }
+        if busy { return .reading }
+        return .summarize
+    }
+
+    public enum Placement: Equatable, Sendable { case session, latest, pinned }
+
+    /// Which scope a caller's ids are: the session (live, or just its ready part), the latest record, or a pin.
+    public static func placement(handed ids: [String], session: [String], readySession: [String], latest: String?)
+        -> Placement
+    {
+        if ids == session || ids == readySession { return .session }
+        if let latest, ids == [latest] { return .latest }
+        return .pinned
+    }
+
     /// How long after a timecode click a mouse-down elsewhere is taken as part of that click's consequences (the
     /// browser coming forward, a permission prompt, the player opening) and does not close the window.
     public static let citationGrace: TimeInterval = 5
