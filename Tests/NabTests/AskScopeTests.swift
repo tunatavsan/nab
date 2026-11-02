@@ -45,19 +45,26 @@ import Testing
         #expect(AskScope.session.toggled(offered: false) == .session)
     }
 
-    @Test func summaryHeadingNamesTheVideosOrTheShortTitle() {
-        #expect(AskScope.heading(summary: true, question: nil, count: 3, title: nil) == "SUMMARY · 3 VIDEOS")
+    @Test func summaryHeadingNamesTheKindsOrTheShortTitle() {
         #expect(
-            AskScope.heading(summary: true, question: nil, count: 1, title: "Learn Python – Full Course for Beginners")
+            AskScope.heading(summary: true, question: nil, tally: Tally(videos: 3), title: nil) == "SUMMARY · 3 VIDEOS")
+        #expect(
+            AskScope.heading(summary: true, question: nil, tally: Tally(videos: 2, photos: 1), title: nil)
+                == "SUMMARY · 2 VIDEOS AND 1 PHOTO")
+        #expect(
+            AskScope.heading(
+                summary: true, question: nil, tally: Tally(videos: 1), title: "Learn Python – Full Course for Beginners"
+            )
                 == "SUMMARY · LEARN PYTHON")
-        #expect(AskScope.heading(summary: true, question: nil, count: 1, title: nil) == "SUMMARY · 1 VIDEO")
+        #expect(
+            AskScope.heading(summary: true, question: nil, tally: Tally(videos: 1), title: nil) == "SUMMARY · 1 VIDEO")
     }
 
     @Test func questionHeadingIsTheQuestion() {
         #expect(
-            AskScope.heading(summary: false, question: "  Which one first?\n", count: 3, title: nil)
+            AskScope.heading(summary: false, question: "  Which one first?\n", tally: Tally(videos: 3), title: nil)
                 == "Which one first?")
-        #expect(AskScope.heading(summary: false, question: nil, count: 3, title: nil) == "")
+        #expect(AskScope.heading(summary: false, question: nil, tally: Tally(videos: 3), title: nil) == "")
     }
 
     @Test func shortTitleCutsAtASeparatorAndCapsLength() {

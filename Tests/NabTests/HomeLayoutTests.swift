@@ -71,9 +71,18 @@ struct HomeLayoutTests {
         let entries = [entry("a", hoursAgo: 5, session: "s"), entry("b", hoursAgo: 5.01, session: "s")]
         let result = layout(entries, chats: [chat(["a", "b"])])
         let session = try #require(result.days.first?.sessions.first)
-        #expect(session.label.hasSuffix("· 2 videos · 1 chat"))
+        #expect(session.label.hasSuffix("· 2 items · 1 chat"))
         #expect(session.label.hasPrefix("9:59"))
-        #expect(layout([entries[0]]).days[0].sessions[0].label.hasSuffix("· 1 video"))
+        #expect(layout([entries[0]]).days[0].sessions[0].label.hasSuffix("· 1 item"))
+    }
+
+    @Test func sessionLabelCountsByKind() throws {
+        var pin = entry("p", hoursAgo: 5, session: "s")
+        pin.capture = MediaTests.pin([MediaTests.photo, MediaTests.clip])
+        var text = entry("t", hoursAgo: 5.01, session: "s")
+        text.capture = Capture(source: .youtube, sourceID: "t", url: text.url, title: "A")
+        let session = try #require(layout([pin, text]).days.first?.sessions.first)
+        #expect(session.label.hasSuffix("· 2 videos and 1 photo"))
     }
 
     @Test func chatAttachesToTheSessionHoldingAllItsVideos() throws {
@@ -140,6 +149,8 @@ struct HomeLayoutTests {
             ChatMessage(role: .assistant, text: "ok"),
         ]
         #expect(ChatPreview(c).title == "Summary of 3 videos")
+        #expect(
+            ChatPreview(c, tallyOf: { _ in Tally(videos: 1, photos: 2) }).title == "Summary of 1 video and 2 photos")
         var one = Conversation(entryIDs: ["youtube:a"])
         one.messages = c.messages
         #expect(ChatPreview(one, titleOf: { _ in "Learn Python" }).title == "Summary of Learn Python")

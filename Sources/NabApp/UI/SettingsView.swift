@@ -46,12 +46,12 @@ private struct SettingsCaptureSection: View {
                 SettingsToggleRow(
                     title: "Copy each video when it lands", detail: "The transcript goes straight to your clipboard.",
                     isOn: $autoCopy)
-                SettingsRow(title: "New session after", detail: "Videos nabbed closer together join one session.") {
+                SettingsRow(title: "New session after", detail: "Items nabbed close together join one session.") {
                     ValueStepper(value: $idleMinutes, range: 1...60) { "\($0) min" }
                 }
                 SettingsToggleRow(
                     title: "Open at login", detail: loginError, detailIsError: loginError != nil, isOn: $openAtLogin)
-                SettingsRow(title: "Library folder", detail: "Videos and chats are stored here.") {
+                SettingsRow(title: "Library folder", detail: "Your library and chats are stored here.") {
                     NabButton("Show in Finder") {
                         NSWorkspace.shared.activateFileViewerSelecting([
                             LibraryStore.defaultFolder.deletingLastPathComponent()

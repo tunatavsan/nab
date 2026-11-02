@@ -2,7 +2,7 @@ import NabAI
 import NabCore
 import SwiftUI
 
-/// A chat about one or several videos: the sources on top, the thread and composer in the middle, and a
+/// A chat about one or several saved items: the sources on top, the thread and composer in the middle, and a
 /// transcript drawer on the right that opens from a source card or a citation.
 struct SessionPage: View {
     let ids: [String]
@@ -15,19 +15,21 @@ struct SessionPage: View {
     /// The drawer's motion, a short fade with Reduce Motion on.
     private var drawerMotion: Animation { Motion.resolved(Motion.settle, reduceMotion: reduceMotion) }
 
-    /// Videos in the order the chat numbers them.
+    /// Items in the order the chat numbers them.
     private var orderedIDs: [String] { model.assistant.conversation(ids)?.entryIDs ?? ids }
 
     private var entries: [Entry] { orderedIDs.compactMap { model.center.entry($0) } }
 
-    /// Ready videos, which are the ones citations number.
+    /// Ready items, which are the ones citations number.
     private var numbered: [Entry] { entries.filter { $0.capture != nil } }
 
     var body: some View {
         HStack(spacing: Space.s) {
             VStack(spacing: 0) {
-                SourcesStrip(entries: entries, numbered: numbered, selected: drawerID, copy: model.copyContext) {
-                    entry in
+                SourcesStrip(
+                    entries: entries, numbered: numbered, selected: drawerID, copy: model.copyContext,
+                    saving: { model.center.savingProgress[$0] }
+                ) { entry in
                     withAnimation(drawerMotion) {
                         drawerID = entry.id
                         drawerFocus = nil
@@ -81,12 +83,13 @@ struct SessionPage: View {
     }
 }
 
-/// "Sources · 3": one card per video.
+/// "Sources · 3": one card per item.
 private struct SourcesStrip: View {
     let entries: [Entry]
     let numbered: [Entry]
     let selected: String?
     let copy: () -> Void
+    let saving: (String) -> Double?
     let open: (Entry) -> Void
 
     var body: some View {
@@ -96,7 +99,7 @@ private struct SourcesStrip: View {
                 Spacer(minLength: Space.s)
                 // ⇧⌘C is the library's copy-context shortcut on every page.
                 NabButton("Copy all", shortcut: "⇧⌘C", kind: .ghost, action: copy)
-                    .help("Copy the videos as a context pack for AI (⇧⌘C)")
+                    .help("Copy the session for AI (⇧⌘C)")
             }
             GeometryReader { proxy in
                 let width = max(
@@ -106,7 +109,7 @@ private struct SourcesStrip: View {
                         ForEach(entries) { entry in
                             SourceCard(
                                 entry: entry, number: numbered.firstIndex { $0.id == entry.id }.map { $0 + 1 },
-                                on: selected == entry.id
+                                on: selected == entry.id, saving: saving(entry.id)
                             ) { open(entry) }
                             .frame(width: width)
                         }
@@ -127,6 +130,7 @@ private struct SourceCard: View {
     let entry: Entry
     let number: Int?
     let on: Bool
+    var saving: Double?
     let action: () -> Void
     @State private var hovering = false
 
@@ -157,13 +161,19 @@ private struct SourceCard: View {
         }
         .buttonStyle(PressableStyle(scale: 0.98))
         .onHover { over in withAnimation(Motion.snap) { hovering = over } }
-        .accessibilityLabel("Open the transcript of \(entry.title)")
-        .help("Show the transcript")
+        .accessibilityLabel(
+            showsMedia ? "Show the photos and clips of \(entry.title)" : "Open the transcript of \(entry.title)"
+        )
+        .help(showsMedia ? "Show the photos and clips" : "Show the transcript")
     }
 
+    /// A photo or clip record opens its gallery in the drawer, not a transcript.
+    private var showsMedia: Bool { entry.capture?.isMedia == true }
+
     private var detail: String {
+        if let line = entry.cardLine(saving: saving) { return line }
         switch entry.phase {
-        case .fetching, .saving: return "Fetching transcript…"
+        case .fetching, .saving: return "Fetching…"
         case .failed: return entry.failure ?? "Could not be read"
         case .ready:
             let language = entry.capture?.transcript.map { $0.languageName ?? $0.languageCode } ?? "No captions"

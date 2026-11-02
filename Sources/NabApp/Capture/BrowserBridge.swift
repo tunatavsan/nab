@@ -120,7 +120,7 @@ enum NabBridgeError: Error, Sendable {
     var message: String {
         switch self {
         case .noBrowser: "No supported browser is open."
-        case .noLink: "The front tab isn't a YouTube video."
+        case .noLink: "The front tab isn't a page Nab reads."
         case .notAllowed(let browser): "Allow Nab in System Settings › Privacy & Security › Automation › \(browser)."
         case .waitingForPermission(let browser):
             "Answer the Automation prompt for \(browser), then try again. If none appeared: System Settings › Privacy & Security › Automation."

@@ -62,7 +62,7 @@ struct SearchPalette: View {
         var result: [PaletteGroup] = []
         if !found.videos.isEmpty {
             result.append(
-                PaletteGroup(name: query.isEmpty ? "Recent videos" : "Videos", rows: found.videos.map(PaletteRow.video))
+                PaletteGroup(name: query.isEmpty ? "Recent" : "Saved", rows: found.videos.map(PaletteRow.video))
             )
         }
         if !found.chats.isEmpty {
@@ -138,7 +138,7 @@ struct SearchPalette: View {
             Image(systemName: "magnifyingglass").font(.system(size: 16, weight: .medium))
                 .foregroundStyle(Palette.inkSecondary)
             TextField(
-                "Search videos, chats and transcripts",
+                "Search titles, chats and transcripts",
                 // Once closed, the field still writes its last text back as it ends editing; that write would
                 // reopen the palette, so it is dropped.
                 text: Binding(get: { query }, set: { if model.searchQuery != nil { model.searchQuery = $0 } })
@@ -400,8 +400,8 @@ private struct PaletteRowView: View {
                     ? "this session" : entry.addedAt.formatted(.dateTime.month(.abbreviated).day()))
             return parts.joined(separator: " · ")
         case .chat(let hit):
-            let n = hit.chat.entryIDs.count
-            return "Chat · \(n) video\(n == 1 ? "" : "s") · "
+            let counted = RackText.count(Tally(hit.chat.entryIDs.compactMap { model.center.entry($0) }))
+            return "Chat · \(counted) · "
                 + hit.chat.updatedAt.formatted(date: .omitted, time: .shortened)
         case .transcript(let hit): return hit.videoTitle
         case .nabLink(let url): return (url.host() ?? "") + url.path() + (url.query().map { "?" + $0 } ?? "")

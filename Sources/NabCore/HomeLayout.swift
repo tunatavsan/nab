@@ -26,8 +26,12 @@ public struct ChatPreview: Identifiable, Sendable, Hashable {
     public let model: String?
     public let updatedAt: Date
 
-    /// `titleOf` names an entry; it is used for the title of a summary chat about one video.
-    public init(_ chat: Conversation, titleOf: (String) -> String? = { _ in nil }) {
+    /// `titleOf` names an entry; it is used for the title of a summary chat about one video. `tallyOf` counts what
+    /// the chat is about by kind; unknown items count as videos.
+    public init(
+        _ chat: Conversation, titleOf: (String) -> String? = { _ in nil },
+        tallyOf: ([String]) -> Tally = { Tally(videos: $0.count) }
+    ) {
         id = chat.id
         entryIDs = chat.entryIDs
         messageCount = chat.messages.count
@@ -41,8 +45,7 @@ public struct ChatPreview: Identifiable, Sendable, Hashable {
         } else if chat.entryIDs.count == 1, let name = titleOf(chat.entryIDs[0]) {
             title = "Summary of \(name)"
         } else {
-            let n = chat.entryIDs.count
-            title = "Summary of \(n) video\(n == 1 ? "" : "s")"
+            title = "Summary of \(RackText.count(tallyOf(chat.entryIDs)))"
         }
     }
 
@@ -75,6 +78,7 @@ public final class ChatPreviewCache {
         let updatedAt: Date
         let messageCount: Int
         let videoTitle: String?
+        let counted: String
     }
 
     private var stored: [String: (stamp: Stamp, preview: ChatPreview)] = [:]
@@ -83,20 +87,27 @@ public final class ChatPreviewCache {
 
     public init() {}
 
-    public func preview(for chat: Conversation, titleOf: (String) -> String? = { _ in nil }) -> ChatPreview {
+    public func preview(
+        for chat: Conversation, titleOf: (String) -> String? = { _ in nil },
+        tallyOf: ([String]) -> Tally = { Tally(videos: $0.count) }
+    ) -> ChatPreview {
         let stamp = Stamp(
             updatedAt: chat.updatedAt, messageCount: chat.messages.count,
-            videoTitle: chat.entryIDs.count == 1 ? titleOf(chat.entryIDs[0]) : nil)
+            videoTitle: chat.entryIDs.count == 1 ? titleOf(chat.entryIDs[0]) : nil,
+            counted: RackText.count(tallyOf(chat.entryIDs)))
         if let hit = stored[chat.id], hit.stamp == stamp { return hit.preview }
-        let preview = ChatPreview(chat, titleOf: titleOf)
+        let preview = ChatPreview(chat, titleOf: titleOf, tallyOf: tallyOf)
         stored[chat.id] = (stamp, preview)
         builds += 1
         return preview
     }
 
     /// Previews of the chats that have messages, in the order given.
-    public func previews(for chats: [Conversation], titleOf: (String) -> String? = { _ in nil }) -> [ChatPreview] {
-        chats.filter { !$0.messages.isEmpty }.map { preview(for: $0, titleOf: titleOf) }
+    public func previews(
+        for chats: [Conversation], titleOf: (String) -> String? = { _ in nil },
+        tallyOf: ([String]) -> Tally = { Tally(videos: $0.count) }
+    ) -> [ChatPreview] {
+        chats.filter { !$0.messages.isEmpty }.map { preview(for: $0, titleOf: titleOf, tallyOf: tallyOf) }
     }
 }
 
@@ -132,7 +143,7 @@ public struct HomeLayout: Sendable, Hashable {
     ) -> HomeLayout {
         let byID = Dictionary(entries.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let previews = chats.filter { !$0.entryIDs.isEmpty && !$0.messages.isEmpty }.map {
-            ChatPreview($0, titleOf: { byID[$0]?.title })
+            ChatPreview($0, titleOf: { byID[$0]?.title }, tallyOf: { Tally($0.compactMap { byID[$0] }) })
         }
         return build(
             entries: entries, previews: previews, openSessionID: openSessionID, filter: filter, now: now,
@@ -145,6 +156,7 @@ public struct HomeLayout: Sendable, Hashable {
         now: Date = .now, calendar: Calendar = .current, locale: Locale = .current
     ) -> HomeLayout {
         let known = Set(entries.map(\.id))
+        let byID = Dictionary(entries.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let groups = SessionGrouping.groups(entries).filter { !$0.entryIDs.isEmpty }
         let members = groups.map { Set($0.entryIDs) }
         var attached: [String: [ChatPreview]] = [:]
@@ -164,7 +176,9 @@ public struct HomeLayout: Sendable, Hashable {
             guard !shownVideos.isEmpty || !shownChats.isEmpty else { return nil }
             return HomeSession(
                 id: id, start: start, isOpen: open, entryIDs: shownVideos, allEntryIDs: ids, chats: shownChats,
-                label: label(start, videos: shownVideos.count, chats: shownChats.count, calendar, locale))
+                label: label(
+                    start, tally: Tally(shownVideos.compactMap { byID[$0] }), chats: shownChats.count, calendar, locale)
+            )
         }
         var open: HomeSession?
         var buckets: [Date: [HomeSession]] = [:]
@@ -187,7 +201,7 @@ public struct HomeLayout: Sendable, Hashable {
                 // A chat across sessions has no videos of its own on the page.
                 let only = HomeSession(
                     id: built.id, start: built.start, isOpen: false, entryIDs: [], allEntryIDs: ids, chats: [chat],
-                    label: label(chat.updatedAt, videos: 0, chats: 1, calendar, locale))
+                    label: label(chat.updatedAt, tally: Tally(), chats: 1, calendar, locale))
                 buckets[calendar.startOfDay(for: chat.updatedAt), default: []].append(only)
             }
         }
@@ -215,14 +229,14 @@ public struct HomeLayout: Sendable, Hashable {
         }
     }
 
-    static func label(_ start: Date, videos: Int, chats: Int, _ calendar: Calendar, _ locale: Locale) -> String {
+    static func label(_ start: Date, tally: Tally, chats: Int, _ calendar: Calendar, _ locale: Locale) -> String {
         var parts = [
             start.formatted(
                 Date.FormatStyle(
                     date: .omitted, time: .shortened, locale: locale, calendar: calendar,
                     timeZone: calendar.timeZone))
         ]
-        if videos > 0 { parts.append("\(videos) video\(videos == 1 ? "" : "s")") }
+        if tally.total > 0 { parts.append(RackText.count(tally)) }
         if chats > 0 { parts.append("\(chats) chat\(chats == 1 ? "" : "s")") }
         return parts.joined(separator: " · ")
     }

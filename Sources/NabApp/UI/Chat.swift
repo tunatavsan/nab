@@ -91,15 +91,20 @@ struct ChatView: View {
                     .help("Copy this conversation as text")
                 NabButton("New chat", kind: .ghost) { assistant.clear(entryIDs) }
                     .disabled(busy)
-                    .help("Start a new chat about these videos")
+                    .help("Start a new chat about these")
             }
         }
     }
 
     private func title(_ messages: [ChatMessage]) -> String {
         if entryIDs.count == 1, let video = ordered.first { return video.title }
-        guard let first = messages.first(where: { $0.role == .user }) else { return "\(entryIDs.count) videos" }
-        return first.isSummaryRequest ? "Summary of \(entryIDs.count) videos" : first.text
+        guard let first = messages.first(where: { $0.role == .user }) else { return counted }
+        return first.isSummaryRequest ? "Summary of \(counted)" : first.text
+    }
+
+    /// What the chat is about, by kind: "2 videos and 3 photos".
+    private var counted: String {
+        RackText.count(Tally(entryIDs.compactMap { model.center.entry($0) }))
     }
 
     private func meta(_ messages: [ChatMessage]) -> String {
@@ -120,13 +125,15 @@ struct ChatView: View {
                 .frame(width: 48, height: 48)
                 .background(Palette.accentWash, in: .circle)
             VStack(spacing: Space.xs) {
-                Text(entryIDs.count == 1 ? "Ask about this video" : "Ask across \(entryIDs.count) videos")
+                Text(entryIDs.count == 1 ? "Ask about this" : "Ask across \(counted)")
                     .font(Typeface.title)
                     .foregroundStyle(Palette.ink)
                 Text(
                     ready
-                        ? "Answers come from the transcript and cite the moment they rest on."
-                        : "Waiting for the transcript…"
+                        ? (ordered.contains { $0.capture?.transcript != nil }
+                            ? "Answers come from the transcript and cite the moment they rest on."
+                            : "Answers come from the title and the description.")
+                        : AskScope.waitingLabel
                 )
                 .font(Typeface.meta)
                 .foregroundStyle(Palette.inkTertiary)
@@ -164,13 +171,13 @@ struct ChatView: View {
             ? [
                 "What is the main argument, and what backs it up?",
                 "List every tool, product and person mentioned.",
-                "What should I do differently after watching this?",
+                "What should I do differently after this?",
                 "Which parts can I skip?",
             ]
             : [
-                "Where do these videos agree, and where do they disagree?",
-                "Give each video three bullets.",
-                "Which one should I watch first, and why?",
+                "Where do these agree, and where do they disagree?",
+                "Give each one three bullets.",
+                "Which one should I start with, and why?",
             ]
     }
 
@@ -180,7 +187,7 @@ struct ChatView: View {
         let canSend = !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !ordered.isEmpty
         return HStack(alignment: .bottom, spacing: 6) {
             TextField(
-                entryIDs.count == 1 ? "Ask about this video" : "Ask about these videos", text: $draft,
+                entryIDs.count == 1 ? "Ask about this" : "Ask about these", text: $draft,
                 selection: $selection, axis: .vertical
             )
             .textFieldStyle(.plain)
@@ -397,12 +404,12 @@ struct ModelMenu: View {
     }
 }
 
-/// Which videos a question is about: all of the session, or one of them.
+/// Which items a question is about: all of the session, or one of them.
 private struct ScopeMenu: View {
     let ids: [String]
     let model: LibraryModel
 
-    /// The videos to choose from: this page's, or the open session's when the page shows one of them.
+    /// The items to choose from: this page's, or the open session's when the page shows one of them.
     private var pool: [String] {
         if ids.count > 1 { return ids }
         let session = model.currentSessionIDs()
@@ -412,11 +419,11 @@ private struct ScopeMenu: View {
     var body: some View {
         let pool = pool
         if pool.count > 1 {
-            MenuChip(title: ids.count > 1 ? "All \(ids.count) videos" : "This video") {
+            MenuChip(title: ids.count > 1 ? "All \(ids.count)" : "This one") {
                 Button {
                     model.go(.session(pool))
                 } label: {
-                    row("All \(pool.count) videos", on: ids.count > 1)
+                    row("All \(pool.count)", on: ids.count > 1)
                 }
                 Divider()
                 ForEach(Array(pool.enumerated()), id: \.element) { index, id in
@@ -427,7 +434,7 @@ private struct ScopeMenu: View {
                     }
                 }
             }
-            .help("Which videos to ask about")
+            .help("Which to ask about")
         }
     }
 

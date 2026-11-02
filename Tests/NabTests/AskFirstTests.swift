@@ -33,8 +33,7 @@ import Testing
     }
 
     @Test func aHeldQuestionNamesWhatItWaitsFor() {
-        #expect(AskScope.waitingLabel(isMedia: false) == "Waiting for the transcript…")
-        #expect(AskScope.waitingLabel(isMedia: true) == "Waiting for the details…")
+        #expect(AskScope.waitingLabel == "Waiting for the details…")
     }
 
     @Test func onlyASendInTheSessionScopeUsesItUp() {
@@ -45,14 +44,14 @@ import Testing
     }
 
     @Test func aHeldQuestionGoesWhenARecordIsReadyAndFailsWithTheReasonOtherwise() {
-        #expect(AskScope.resolveHeld(readyCount: 1, failure: "x", isMedia: false) == .send)
-        #expect(AskScope.resolveHeld(readyCount: 0, failure: "No captions.", isMedia: false) == .fail("No captions."))
+        #expect(AskScope.resolveHeld(readyCount: 1, failure: "x") == .send)
+        #expect(AskScope.resolveHeld(readyCount: 0, failure: "No captions.") == .fail("No captions."))
         #expect(
-            AskScope.resolveHeld(readyCount: 0, failure: nil, isMedia: true)
+            AskScope.resolveHeld(readyCount: 0, failure: nil)
                 == .fail("The details did not arrive. Try again in a moment."))
         #expect(
-            AskScope.resolveHeld(readyCount: 0, failure: "", isMedia: false)
-                == .fail("The transcript did not arrive. Try again in a moment."))
+            AskScope.resolveHeld(readyCount: 0, failure: "")
+                == .fail("The details did not arrive. Try again in a moment."))
     }
 
     @Test func aClickRightAfterATimecodeDoesNotCloseTheWindow() {
