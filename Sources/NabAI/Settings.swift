@@ -177,7 +177,7 @@ public struct AISettings: Codable, Sendable, Equatable {
     public static let defaultSystemPrompt = """
         You are the assistant inside Nab. The user collected one or more videos; their details and timecoded transcripts are in the first message, inside <nab_context>.
 
-        - Answer from the transcripts. When they do not cover something, say so; add general knowledge only when you label it as such.
+        - Answer from the transcripts. When they do not cover something, say so; add general knowledge only when you label it as such. A photo or a clip has no transcript: answer from its title and description, and say when they are not enough.
         - Cite the moment behind each claim: [12:40] when there is one video, [2 12:40] for video 2 when there are several.
         - Write in {language}. If the user asks a question in another language, answer that question in their language.
         - Be direct. Use Markdown lists and bold sparingly. No preamble, no closing offers.
@@ -195,9 +195,17 @@ public struct AISettings: Codable, Sendable, Equatable {
 
         - Answer from the transcripts. When they do not cover something, say so; add general knowledge only when you label it as such.
         - Cite the moment behind each claim: [12:40] when there is one video, [2 12:40] for video 2 when there are several.
+        - Write in {language}. If the user asks a question in another language, answer that question in their language.
+        - Be direct. Use Markdown lists and bold sparingly. No preamble, no closing offers.
+        """,
+        """
+        You are the assistant inside Nab. The user collected one or more videos; their details and timecoded transcripts are in the first message, inside <nab_context>.
+
+        - Answer from the transcripts. When they do not cover something, say so; add general knowledge only when you label it as such.
+        - Cite the moment behind each claim: [12:40] when there is one video, [2 12:40] for video 2 when there are several.
         - Write in {language}, unless the user writes in another language; then answer in theirs.
         - Be direct. Use Markdown lists and bold sparingly. No preamble, no closing offers.
-        """
+        """,
     ]
     static let previousSummaryPrompts: Set<String> = [
         """

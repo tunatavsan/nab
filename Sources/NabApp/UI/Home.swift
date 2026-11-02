@@ -284,6 +284,7 @@ private struct VideoCard: View {
         .buttonStyle(PressableStyle(scale: 0.98))
         .onHover { over in withAnimation(Motion.snap) { hovering = over } }
         .entryContextMenu(entry, model: model)
+        .dragSource(entry.capture)
         .accessibilityLabel(entry.title)
         .accessibilityHint(metaText(entry, saving: saving))
     }

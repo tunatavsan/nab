@@ -1,3 +1,4 @@
+import AppKit
 import NabCore
 import SwiftUI
 
@@ -42,5 +43,41 @@ struct PlayerTargetPicker: View {
 
     var body: some View {
         SegmentedPicker([(PlayerTarget.nab, "Nab"), (PlayerTarget.browser, "Browser")], selection: $selection)
+    }
+}
+
+/// Downloads: the folder photos and clips are saved to.
+struct SettingsDownloadsSection: View {
+    @AppStorage(MediaFolder.key) private var folderSetting = ""
+
+    private var folder: URL { MediaFolder.resolve(setting: folderSetting) }
+
+    var body: some View {
+        SettingsSection(title: "Downloads") {
+            SettingsGroup {
+                SettingsRow(title: "Save photos and videos to", detail: folder.path(percentEncoded: false)) {
+                    HStack(spacing: Space.s) {
+                        NabButton("Choose…", action: choose)
+                        NabButton("Show in Finder", action: reveal)
+                    }
+                }
+            }
+        }
+    }
+
+    private func choose() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = folder
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        folderSetting = url.path(percentEncoded: false)
+    }
+
+    private func reveal() {
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        NSWorkspace.shared.activateFileViewerSelecting([folder])
     }
 }

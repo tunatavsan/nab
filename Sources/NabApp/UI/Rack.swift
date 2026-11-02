@@ -294,6 +294,7 @@ private struct ReadyCard: View {
             }
         }
         .accessibilityElement(children: .combine)
+        .dragSource(failed ? nil : entry?.capture)
         .frameProbe("toast.update", Double(toast.pulse))
     }
 

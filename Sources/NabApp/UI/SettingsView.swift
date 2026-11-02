@@ -19,6 +19,7 @@ struct SettingsView: View {
                     .accessibilityAddTraits(.isHeader)
                 SettingsAICard(assistant: assistant)
                 SettingsCaptureSection()
+                SettingsDownloadsSection()
                 SettingsGeneralSection()
                 SettingsShortcutsSection()
                 SettingsPromptsSection(assistant: assistant)
@@ -44,7 +45,7 @@ private struct SettingsCaptureSection: View {
         SettingsSection(title: "Capture", footnote: "Dubbed videos use the captions of the language you hear.") {
             SettingsGroup {
                 SettingsToggleRow(
-                    title: "Copy each video when it lands", detail: "The transcript goes straight to your clipboard.",
+                    title: "Copy each item when it lands", detail: "Videos as context, photos and clips as files.",
                     isOn: $autoCopy)
                 SettingsRow(title: "New session after", detail: "Items nabbed close together join one session.") {
                     ValueStepper(value: $idleMinutes, range: 1...60) { "\($0) min" }

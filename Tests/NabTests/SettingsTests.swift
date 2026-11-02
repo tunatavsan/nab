@@ -24,6 +24,13 @@ struct SettingsTests {
         #expect(back.language == "Turkish" && back.systemPrompt == AISettings.defaultSystemPrompt)
     }
 
+    @Test func theDefaultPromptAnswersFromTitleAndDescriptionWhereThereIsNoTranscript() {
+        #expect(AISettings.defaultSystemPrompt.contains("A photo or a clip has no transcript"))
+        // The line before this build's default is still recognised as "the default", so it follows the new one.
+        #expect(AISettings.previousSystemPrompts.contains { !$0.contains("no transcript") })
+        #expect(!AISettings.defaultSummaryPrompt.contains("no transcript"))
+    }
+
     @Test func storedOldDefaultsFollowNewOnes() throws {
         let old = try #require(AISettings.previousSystemPrompts.first)
         let oldCodex = try #require(AISettings.previousCommands.first { $0.hasPrefix("codex") })

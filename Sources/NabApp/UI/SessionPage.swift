@@ -161,6 +161,7 @@ private struct SourceCard: View {
         }
         .buttonStyle(PressableStyle(scale: 0.98))
         .onHover { over in withAnimation(Motion.snap) { hovering = over } }
+        .dragSource(entry.capture)
         .accessibilityLabel(
             showsMedia ? "Show the photos and clips of \(entry.title)" : "Open the transcript of \(entry.title)"
         )

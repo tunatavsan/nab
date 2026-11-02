@@ -120,6 +120,7 @@ public enum LibrarySearch {
         }
         var byTitle: [VideoHit] = []
         var byAuthor: [VideoHit] = []
+        var bySummary: [VideoHit] = []
         for entry in entries {
             let author = entry.capture?.author
             if matches(entry.title, terms: words) {
@@ -128,9 +129,14 @@ public enum LibrarySearch {
                 byAuthor.append(
                     VideoHit(
                         entryID: entry.id, title: [HighlightPart(text: entry.title, isMatch: false)], author: author))
+            } else if let summary = entry.capture?.summary, matches(summary, terms: words) {
+                // A pin's description: how a photo or a clip with no transcript is found by what it is about.
+                bySummary.append(
+                    VideoHit(
+                        entryID: entry.id, title: [HighlightPart(text: entry.title, isMatch: false)], author: author))
             }
         }
-        result.videos = Array((byTitle + byAuthor).prefix(maxVideos))
+        result.videos = Array((byTitle + byAuthor + bySummary).prefix(maxVideos))
         result.chats = previews.filter { matches($0.title, terms: words) }.prefix(maxChats).map {
             ChatHit(chat: $0, title: highlight($0.title, terms: words))
         }
