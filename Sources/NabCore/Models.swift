@@ -70,7 +70,8 @@ public struct Capture: Codable, Sendable, Hashable {
         thumbnailURL = try c.decodeIfPresent(URL.self, forKey: .thumbnailURL)
         chapters = try c.decode([Chapter].self, forKey: .chapters)
         transcript = try c.decodeIfPresent(Transcript.self, forKey: .transcript)
-        media = try c.decodeIfPresent([Media].self, forKey: .media) ?? []
+        // A photo or clip of a kind this version does not know (written by a newer one) is skipped, not the item.
+        media = try c.decodeIfPresent([Lossy<Media>].self, forKey: .media)?.compactMap(\.value) ?? []
         aiSummary = try c.decodeIfPresent(String.self, forKey: .aiSummary)
         aiModel = try c.decodeIfPresent(String.self, forKey: .aiModel)
     }
@@ -78,6 +79,17 @@ public struct Capture: Codable, Sendable, Hashable {
     /// A media item: its photos and clips are what the user keeps. A text item: its transcript is.
     /// The interface asks these, never the source.
     public var isMedia: Bool { !media.isEmpty }
+
+    /// Neither a transcript nor photos and clips: nothing to keep. A pin saved by this version and then opened by an
+    /// older one loses its list of files that way, so nabbing it again reads it again (and finds its files, still in
+    /// the folder under its name). A video without captions is read again too, which picks up captions added since.
+    public var holdsNothing: Bool { transcript == nil && media.isEmpty }
+}
+
+/// Decodes a value or nothing, so one unreadable element does not fail the list around it.
+struct Lossy<Value: Decodable>: Decodable {
+    let value: Value?
+    init(from decoder: any Decoder) throws { value = try? Value(from: decoder) }
 }
 
 /// One photo or clip of an item: where the source's best copy lives and, once Nab has saved it, where it is on disk.
@@ -108,6 +120,15 @@ public struct Media: Codable, Sendable, Hashable {
     }
 
     public var savedURL: URL? { savedPath.map { URL(filePath: $0) } }
+
+    /// Whether a file of `size` bytes (nil: no file there) is this item's saved copy: the size it was saved at, or
+    /// any size above zero when that was not recorded.
+    public func isIntact(size: Int64?) -> Bool { Self.isIntact(size: size, expected: byteCount) }
+
+    static func isIntact(size: Int64?, expected: Int64?) -> Bool {
+        guard let size, size > 0 else { return false }
+        return expected.map { $0 == size } ?? true
+    }
 }
 
 public struct Chapter: Codable, Sendable, Hashable {

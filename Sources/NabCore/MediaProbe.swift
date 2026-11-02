@@ -41,9 +41,14 @@ public enum MediaProbe {
     }
 
     /// A file already saved under `file`'s name: that name, or the same name with the extension a misnamed copy was
-    /// renamed to. Empty files do not count.
-    public static func existing(_ file: URL, fileManager: FileManager = .default) -> URL? {
-        if size(of: file, fileManager: fileManager) > 0 { return file }
+    /// renamed to. It must be at the size it was saved at (`expected`), or above zero when that is not known.
+    public static func existing(
+        _ file: URL, size expected: Int64? = nil, fileManager: FileManager = .default
+    ) -> URL? {
+        func fits(_ url: URL) -> Bool {
+            Media.isIntact(size: fileSize(atPath: url.path, fileManager: fileManager), expected: expected)
+        }
+        if fits(file) { return file }
         let stem = file.deletingPathExtension().lastPathComponent
         let folder = file.deletingLastPathComponent()
         let names = (try? fileManager.contentsOfDirectory(atPath: folder.path)) ?? []
@@ -51,9 +56,13 @@ public enum MediaProbe {
             .filter { $0 != file.lastPathComponent && !$0.hasSuffix(".partial") }
             .map { folder.appending(path: $0) }
             .first { candidate in
-                candidate.deletingPathExtension().lastPathComponent == stem
-                    && size(of: candidate, fileManager: fileManager) > 0
+                candidate.deletingPathExtension().lastPathComponent == stem && fits(candidate)
             }
+    }
+
+    /// The size of the file at `path`, or nil when there is none.
+    public static func fileSize(atPath path: String, fileManager: FileManager = .default) -> Int64? {
+        (try? fileManager.attributesOfItem(atPath: path)[.size] as? NSNumber)?.int64Value
     }
 
     static func size(of file: URL, fileManager: FileManager = .default) -> Int64 {
@@ -80,7 +89,7 @@ extension SourceProvider {
     ) async throws -> Media {
         var file = file
         var facts: MediaProbe.Facts?
-        if let earlier = MediaProbe.existing(file) {
+        if let earlier = MediaProbe.existing(file, size: media.byteCount) {
             file = earlier
             facts = await MediaProbe.facts(of: file, kind: media.kind)
         } else {

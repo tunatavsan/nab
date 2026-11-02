@@ -19,8 +19,9 @@ public enum MediaFolder {
         return downloads.appending(path: "Nab", directoryHint: .isDirectory)
     }
 
-    /// Half-arrived files Nab left in `folder` when it quit mid-download: `….partial` under one of Nab's own names
-    /// (`Title (Pinterest 123).png.partial`). Anything else in the folder is the user's and is never touched.
+    /// Half-moved files Nab left in `folder`: `….partial` under one of Nab's own names (`Title (Pinterest 123).png
+    /// .partial`). A transfer arrives in the system's temporary folder and is a `.partial` here only between its move
+    /// and its rename, so one is left only when Nab quit right then. Anything else in the folder is never touched.
     public static func leftovers(
         in folder: URL, sourceNames: [String], fileManager: FileManager = .default
     ) -> [URL] {
@@ -107,34 +108,43 @@ public final class MediaDownloader: Sendable {
     private let gate: Gate
     private let attempts: Int
     private let backoff: Duration
+    /// Runs while a finished transfer sits as `.partial` next to its target, just before the rename; tests use it to
+    /// stop a download at that point.
+    private let beforeRename: @Sendable () async -> Void
 
-    public init(
+    public convenience init(
         session: URLSession = .nabMedia, limit: Int = 6, attempts: Int = 3, backoff: Duration = .milliseconds(800)
+    ) {
+        self.init(session: session, limit: limit, attempts: attempts, backoff: backoff, beforeRename: {})
+    }
+
+    init(
+        session: URLSession, limit: Int, attempts: Int, backoff: Duration,
+        beforeRename: @escaping @Sendable () async -> Void
     ) {
         self.session = session
         gate = Gate(limit: limit)
         self.attempts = attempts
         self.backoff = backoff
+        self.beforeRename = beforeRename
     }
 
     /// Writes `url` to `file` and returns its size. The transfer goes to a temporary file, then to `<file>.partial`
     /// next to the target, and takes the real name in one rename, so a half-written file never sits under it.
-    /// 429 and 503 are retried after a growing wait (`attempts` tries in all). Cancelling the calling task stops the
-    /// transfer and leaves no partial file behind.
+    /// 429 and 503 are retried after a growing wait (`attempts` tries in all), waited out without holding a slot.
+    /// Cancelling the calling task stops the transfer and leaves no partial file behind.
     @discardableResult
     public func download(
         _ url: URL, to file: URL, headers: [String: String] = [:],
         progress: @escaping @Sendable (_ received: Int64, _ expected: Int64?) -> Void = { _, _ in }
     ) async throws -> Int64 {
-        try await gate.run {
-            var attempt = 1
-            while true {
-                do {
-                    return try await transfer(url, to: file, headers: headers, progress: progress)
-                } catch let error as HTTPStatusError where [429, 503].contains(error.status) && attempt < attempts {
-                    try await Task.sleep(for: backoff * (1 << (attempt - 1)))
-                    attempt += 1
-                }
+        var attempt = 1
+        while true {
+            do {
+                return try await gate.run { try await transfer(url, to: file, headers: headers, progress: progress) }
+            } catch let error as HTTPStatusError where [429, 503].contains(error.status) && attempt < attempts {
+                try await Task.sleep(for: backoff * (1 << (attempt - 1)))
+                attempt += 1
             }
         }
     }
@@ -159,6 +169,7 @@ public final class MediaDownloader: Sendable {
         do {
             try? fm.removeItem(at: partial)
             try fm.moveItem(at: temporary, to: partial)
+            await beforeRename()
             try Task.checkCancellation()
             // rename(2) replaces the target in one step on the same volume.
             guard rename(partial.path, file.path) == 0 else { throw CocoaError(.fileWriteUnknown) }

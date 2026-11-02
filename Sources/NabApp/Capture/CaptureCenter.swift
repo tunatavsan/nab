@@ -12,6 +12,8 @@ final class CaptureCenter {
         var title: String
         var detail: String
         var thumbnail: URL?
+        /// Entries whose saved files are gone; the card offers "Save again" for them.
+        var saveAgain: [String] = []
         /// Changes on every update so the toast re-lands even when the text repeats.
         var pulse = 0
     }
@@ -164,6 +166,15 @@ final class CaptureCenter {
                 save(entry.id)
                 return
             }
+            if entry.phase == .ready, entry.capture?.holdsNothing == true {
+                if announce {
+                    show(
+                        .init(tone: .working, title: entry.title, detail: "Fetching…", thumbnail: entry.thumbnailURL),
+                        hold: true)
+                }
+                fetch(entry.id)
+                return
+            }
             if announce {
                 let saved = entry.phase == .ready && entry.capture?.isMedia == true
                 show(
@@ -300,6 +311,7 @@ final class CaptureCenter {
                     detail: "Press \(shortcut) with a \(RackText.list(registry.names, "or")) page in front."))
             return
         }
+        guard CopyPayload.missing(captures).isEmpty else { return showMissing(session) }
         let payload = CopyPayload.session(captures)
         Pasteboard.write(payload)
         ownCopyCount = Pasteboard.board.changeCount
@@ -310,6 +322,22 @@ final class CaptureCenter {
             .init(
                 tone: .done, title: RackText.copied(Tally(captures: captures)),
                 detail: Self.pasteHint(payload) + (pending > 0 ? " · \(pending) still fetching" : "")))
+    }
+
+    /// Says that saved files are gone instead of copying links to nothing, and offers to save them again.
+    private func showMissing(_ candidates: [Entry]) {
+        let hit = candidates.compactMap { entry in
+            entry.capture.map { (entry, CopyPayload.missing([$0])) }
+        }.filter { !$0.1.isEmpty }
+        guard !hit.isEmpty else { return }
+        let detail = hit.count == 1 ? hit[0].0.title : RackText.count(Tally(hit.flatMap(\.1)))
+        show(.init(tone: .failed, title: "File moved or deleted", detail: detail, saveAgain: hit.map(\.0.id)))
+    }
+
+    /// "Save again" on that card: saves the missing files of each entry.
+    func saveAgain(_ ids: [String]) {
+        dismissToast()
+        for id in ids { retry(id) }
     }
 
     /// Where a copy goes: "~13k tokens · paste into any AI" for a context pack, Finder or a chat for files.
@@ -350,6 +378,7 @@ final class CaptureCenter {
         // nabbing several items in a row leaves the latest one on the clipboard.
         let current = Pasteboard.board.changeCount
         if current == mark || current == ownCopyCount {
+            guard CopyPayload.missing([capture]).isEmpty else { return showMissing([entry]) }
             let payload = CopyPayload.single(capture)
             Pasteboard.write(payload)
             ownCopyCount = Pasteboard.board.changeCount
@@ -513,9 +542,9 @@ final class CaptureCenter {
         guard let index = entries.firstIndex(where: { $0.id == id }), var capture = entries[index].capture else {
             return
         }
+        // The size stays: a file found again under the same name counts only at the size it was saved at.
         for i in capture.media.indices where gone.contains(capture.media[i]) {
             capture.media[i].savedPath = nil
-            capture.media[i].byteCount = nil
         }
         entries[index].capture = capture
         persist(entries[index])

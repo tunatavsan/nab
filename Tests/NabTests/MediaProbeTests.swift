@@ -71,6 +71,53 @@ struct MediaProbeTests {
         FileManager.default.createFile(atPath: folder.appending(path: "Lamp (Pins 2).png").path, contents: Data())
         _ = try await painter.store(photo, of: pin, at: folder.appending(path: "Lamp (Pins 2).png"))
         #expect(painter.saves == 2)
+        // Nor is one at another size than the one it was saved at.
+        var resized = photo
+        resized.byteCount = (renamed.byteCount ?? 0) + 1
+        _ = try await painter.store(resized, of: pin, at: folder.appending(path: "Lamp (Pins 1).png"))
+        #expect(painter.saves == 3)
+    }
+
+    /// A file cut short or replaced is not the saved copy: Copy and a drag say it is gone, and nabbing again does not
+    /// take it as saved before.
+    @Test func aFileAtAnotherSizeIsNotTheSavedOne() throws {
+        var photo = Media(
+            kind: .image, url: URL(string: "https://i.example/a.png")!, savedPath: "/m/a.png", byteCount: 10)
+        #expect(photo.isIntact(size: 10))
+        #expect(!photo.isIntact(size: 9) && !photo.isIntact(size: 0) && !photo.isIntact(size: nil))
+        let pin = Capture(
+            source: SourceKind(rawValue: "pins"), sourceID: "1", url: photo.url, title: "Lamp", media: [photo])
+        #expect(CopyPayload.missing([pin]) { _ in 9 } == [photo])
+        #expect(CopyPayload.missing([pin]) { _ in 10 }.isEmpty)
+        photo.byteCount = nil
+        #expect(photo.isIntact(size: 1) && !photo.isIntact(size: 0))
+
+        let folder = FileManager.default.temporaryDirectory.appending(path: "nab-size-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let file = folder.appending(path: "Lamp (Pins 1).png")
+        FileManager.default.createFile(atPath: file.path, contents: Data("four".utf8))
+        #expect(MediaProbe.existing(file, size: 4) == file)
+        #expect(MediaProbe.existing(file, size: 5) == nil)
+        #expect(MediaProbe.existing(file) == file)
+    }
+
+    /// An item an older Nab saved without its list of files holds nothing and is read again; a file of a kind a
+    /// newer Nab wrote is skipped, and the item still opens.
+    @Test func anEmptyItemIsReadAgainAndAnUnknownKindSkipsOnlyThatFile() throws {
+        let head = #"{"source":"pinterest","sourceID":"1","url":"https://example.com/pin/1/","title":"Lamp","#
+        let hollow = try JSONDecoder().decode(Capture.self, from: Data((head + #""keywords":[],"chapters":[]}"#).utf8))
+        #expect(hollow.holdsNothing)
+        let mixed = try JSONDecoder().decode(
+            Capture.self,
+            from: Data(
+                (head + #""keywords":[],"chapters":[],"media":[{"kind":"audio","url":"https://i.example/a.m4a"},"#
+                    + #"{"kind":"image","url":"https://i.example/a.png"}]}"#).utf8))
+        #expect(mixed.media.map(\.kind) == [.image])
+        #expect(!mixed.holdsNothing)
+        let read = Capture(
+            source: .youtube, sourceID: "a", url: URL(string: "https://youtu.be/a")!, title: "A",
+            transcript: Transcript(languageCode: "en", languageName: nil, isGenerated: false, segments: []))
+        #expect(!read.holdsNothing)
     }
 
     @Test func onlyNabsOwnHalfFilesAreLeftovers() throws {

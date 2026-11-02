@@ -183,7 +183,7 @@ private struct RackView: View {
                 openSession()
             }
         case .message:
-            MessageCard(toast: toast)
+            MessageCard(toast: toast) { center.saveAgain(toast.saveAgain) }
                 .onTapGesture { center.dismissToast() }
         }
     }
@@ -330,6 +330,7 @@ private struct ReadyCard: View {
 
 private struct MessageCard: View {
     let toast: CaptureCenter.Toast
+    let saveAgain: () -> Void
 
     var body: some View {
         CardSurface(kind: .message) {
@@ -352,6 +353,7 @@ private struct MessageCard: View {
                     }
                 }
                 Spacer(minLength: 0)
+                if !toast.saveAgain.isEmpty { NabButton("Save again", kind: .ghost, action: saveAgain) }
             }
         }
         .accessibilityElement(children: .combine)

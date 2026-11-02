@@ -197,7 +197,7 @@ struct MediaTests {
             CopyPayload.session([saved, video], capturedAt: day)
                 == .text(ContextPack.render([saved, video], capturedAt: day)))
         #expect(CopyPayload.session([saved, saved]).files?.count == 4)
-        #expect(CopyPayload.missing([saved]) { $0 == "/m/1.png" } == [saved.media[1]])
+        #expect(CopyPayload.missing([saved]) { $0 == "/m/1.png" ? 1 : nil } == [saved.media[1]])
     }
 
     struct ShortLinks: SourceProvider {
