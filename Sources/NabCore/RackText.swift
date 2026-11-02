@@ -41,10 +41,16 @@ public enum RackText {
     }
 
     /// The kind line on a card for an item made of photos and clips: "Photo · 2400×3600", "Video · 0:42",
-    /// "4 photos", or "Saving… 42%" while its files arrive. Nil for an item read as text, whose card says more.
+    /// "4 photos", or "Saving… 42%" while its files arrive; what could not be saved follows ("4 videos · 1 of 5 clips
+    /// can't be saved"). Nil for an item read as text, whose card says more.
     public static func kindLine(_ capture: Capture, saving progress: Double? = nil) -> String? {
         guard capture.isMedia else { return nil }
         if let progress { return "Saving… \(Int((min(max(progress, 0), 1) * 100).rounded(.down)))%" }
+        let line = kind(of: capture)
+        return capture.note.map { "\(line) · \($0)" } ?? line
+    }
+
+    private static func kind(of capture: Capture) -> String {
         guard capture.media.count == 1, let only = capture.media.first else { return count(Tally(capture.media)) }
         if only.kind == .video, let d = only.duration ?? capture.duration { return "Video · \(Timecode.string(d))" }
         return mediaLine(only)

@@ -6,8 +6,10 @@ extension SourceKind {
 }
 
 /// Reads Pinterest pins without an account: photos, videos, idea pins and carousels, each at the best copy
-/// Pinterest hands to a signed-out browser. No cookie is sent and none is read; a refusal is reported, not worked
-/// around. At most eight requests to Pinterest are in flight at once, and a busy answer is waited out, three tries.
+/// Pinterest hands to a signed-out browser. No cookie is sent, stored or read (its sessions refuse them); a refusal
+/// is reported, not worked around. At most eight requests for a pin's details are in flight at once, and a busy
+/// answer is waited out, three tries. Saving a file is the downloader's own queue, so a long download never holds
+/// back the next pin's details.
 public struct PinterestSource: SourceProvider {
     public let kind = SourceKind.pinterest
     public let name = "Pinterest"
@@ -20,11 +22,22 @@ public struct PinterestSource: SourceProvider {
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
     static let attempts = 3
 
-    public init(
-        session: URLSession = .nab, downloader: MediaDownloader = .shared, backoff: Duration = .milliseconds(800)
-    ) {
-        self.session = session
-        self.downloader = downloader
+    /// Pinterest's sessions: the shared ones with cookies switched off, so nothing it sets is ever sent back.
+    static let cookielessDetails = URLSession(configuration: cookieless(URLSession.nab.configuration))
+    static let cookielessMedia = MediaDownloader(
+        session: URLSession(configuration: cookieless(URLSession.nabMedia.configuration)))
+
+    static func cookieless(_ config: URLSessionConfiguration) -> URLSessionConfiguration {
+        config.httpShouldSetCookies = false
+        config.httpCookieAcceptPolicy = .never
+        config.httpCookieStorage = nil
+        return config
+    }
+
+    public init(session: URLSession? = nil, downloader: MediaDownloader? = nil, backoff: Duration = .milliseconds(800))
+    {
+        self.session = session ?? Self.cookielessDetails
+        self.downloader = downloader ?? Self.cookielessMedia
         self.backoff = backoff
     }
 
@@ -65,7 +78,7 @@ public struct PinterestSource: SourceProvider {
 
     public func fetch(_ url: URL) async throws -> Capture {
         if isShortLink(url) { return try await fetch(try await expand(url)) }
-        if let image = PinterestURL.image(in: url) { return Self.capture(of: image, from: url) }
+        if let image = PinterestURL.image(in: url) { return try await capture(of: image, from: url) }
         guard let id = PinterestURL.pinID(in: url) else { throw NabError("Not a Pinterest pin link.") }
         let pin = try await load(id)
         let media = try await resolve(pin.slots)
@@ -73,15 +86,30 @@ public struct PinterestSource: SourceProvider {
         return Capture(
             source: .pinterest, sourceID: id, url: PinterestURL.pinURL(id), title: pin.title, author: pin.author,
             authorURL: pin.authorURL, duration: durations.isEmpty ? nil : durations.reduce(0, +),
-            summary: pin.summary, thumbnailURL: pin.thumbnail, media: media)
+            summary: pin.summary, thumbnailURL: pin.thumbnail, media: media, note: pin.note)
     }
 
-    /// A link straight to a photo has no pin around it: just the photo at its original size.
-    private static func capture(of image: PinterestURL.Image, from url: URL) -> Capture {
-        let full = PinterestURL.imageURL(size: "originals", hash: image.hash, ext: image.ext) ?? url
+    /// A link straight to a photo has no pin around it: just the photo, at the largest copy Pinterest will give,
+    /// named for its file. The copy is found now (not when saving), so the address, the file name and the type all
+    /// say what will really be on disk.
+    private func capture(of image: PinterestURL.Image, from url: URL) async throws -> Capture {
+        guard let copy = await bestCopy(of: image) else { throw NabError("Pinterest has no copy of this photo.") }
         return Capture(
-            source: .pinterest, sourceID: image.hash, url: url, title: "Pinterest image", thumbnailURL: url,
-            media: [Media(kind: .image, url: full)])
+            source: .pinterest, sourceID: image.hash, url: url,
+            title: url.deletingPathExtension().lastPathComponent, thumbnailURL: url,
+            media: [Media(kind: .image, url: copy)])
+    }
+
+    /// The first copy that answers, largest first: `originals` in the link's own extension, then the other
+    /// extensions Pinterest keeps originals in (a wrong one is a 403), then 1200 wide, then 736.
+    private func bestCopy(of image: PinterestURL.Image) async -> URL? {
+        var seen = Set<String>()
+        let extensions = ([image.ext] + ["jpg", "png", "webp", "gif"]).filter { seen.insert($0).inserted }
+        let candidates =
+            extensions.compactMap { PinterestURL.imageURL(size: "originals", hash: image.hash, ext: $0) }
+            + ["1200x", "736x"].compactMap { PinterestURL.imageURL(size: $0, hash: image.hash, ext: "jpg") }
+        for candidate in candidates where await head(candidate) != nil { return candidate }
+        return nil
     }
 
     /// The pin from the API; from its page when the API refuses or answers with nothing.
@@ -130,6 +158,12 @@ public struct PinterestSource: SourceProvider {
                 group.addTask {
                     switch slot {
                     case .image(let media): return (index, media)
+                    case .guessed(let media):
+                        guard let image = PinterestURL.image(in: media.url), let copy = await self.bestCopy(of: image)
+                        else { return (index, media) }
+                        var found = media
+                        found.url = copy
+                        return (index, found)
                     case .video(let variants):
                         guard let best = await self.best(of: variants) else { throw PinterestPin.changed }
                         return (
@@ -159,12 +193,19 @@ public struct PinterestSource: SourceProvider {
         return PinterestPin.choose(variants, sizes: sizes)
     }
 
-    private func length(of url: URL) async -> Int64? {
+    /// The answer to a HEAD when the address is there (2xx), else nil.
+    private func head(_ url: URL) async -> HTTPURLResponse? {
         var request = URLRequest(url: url)
         request.httpMethod = "HEAD"
         request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
-        guard let (_, response) = try? await send(request), (200..<300).contains(response.statusCode),
-            let text = response.value(forHTTPHeaderField: "Content-Length"), let size = Int64(text), size > 0
+        guard let (_, response) = try? await send(request), (200..<300).contains(response.statusCode) else {
+            return nil
+        }
+        return response
+    }
+
+    private func length(of url: URL) async -> Int64? {
+        guard let text = await head(url)?.value(forHTTPHeaderField: "Content-Length"), let size = Int64(text), size > 0
         else { return nil }
         return size
     }
@@ -186,9 +227,9 @@ public struct PinterestSource: SourceProvider {
         let headers = ["User-Agent": Self.userAgent]
         for (index, url) in urls.enumerated() {
             do {
-                _ = try await gate.run {
-                    try await downloader.download(url, to: file, headers: headers, progress: progress)
-                }
+                // The downloader has its own queue; holding the details gate here would stall every new pin behind
+                // the slowest download.
+                try await downloader.download(url, to: file, headers: headers, progress: progress)
                 return
             } catch let error as HTTPStatusError where error.status == 403 && index < urls.count - 1 {
                 continue

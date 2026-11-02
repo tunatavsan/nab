@@ -46,10 +46,19 @@ final class PinterestStub: URLProtocol, @unchecked Sendable {
         let token = request.value(forHTTPHeaderField: "X-Stub-Router") ?? ""
         let router = Self.lock.withLock { Self.routers[token] }
         let reply = router?.answer(request) ?? Reply(status: 500)
+        if reply.status == 0 { return }  // never answers: a download that stalls
         var headers = reply.headers
         if headers["Content-Length"] == nil { headers["Content-Length"] = "\(reply.body.count)" }
         let response = HTTPURLResponse(
             url: request.url!, statusCode: reply.status, httpVersion: "HTTP/1.1", headerFields: headers)!
+        if (300..<400).contains(reply.status), let location = headers["Location"].flatMap(URL.init(string:)) {
+            // A real redirect: the session asks its delegate whether to follow it.
+            client?.urlProtocol(self, wasRedirectedTo: URLRequest(url: location), redirectResponse: response)
+            // If the delegate refuses to follow, the redirect itself is the answer.
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocolDidFinishLoading(self)
+            return
+        }
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         if request.httpMethod != "HEAD" { client?.urlProtocol(self, didLoad: reply.body) }
         client?.urlProtocolDidFinishLoading(self)
@@ -90,6 +99,10 @@ private enum Fake {
         ]
     }
 
+    static func streamClip(_ n: Int) -> [String: Any] {
+        ["video_list": ["V_HLSV3_MOBILE": entry(clip("hls", n, ext: "m3u8"))]]
+    }
+
     static func api(_ data: [String: Any]?) -> PinterestStub.Reply {
         let body: [String: Any] = ["resource_response": ["status": "success", "data": data as Any]]
         return PinterestStub.Reply(status: 200, body: try! JSONSerialization.data(withJSONObject: body))
@@ -119,15 +132,15 @@ struct PinterestTests {
     @Test func recognisesEveryShapeOfPinLink() {
         let source = PinterestSource()
         for link in [
-            "https://www.pinterest.com/pin/352688214593322121/",
-            "https://pinterest.com/pin/352688214593322121",
-            "https://tr.pinterest.com/pin/some-title-here--352688214593322121/",
-            "https://www.pinterest.co.uk/pin/352688214593322121/",
-            "https://uk.pinterest.com/pin/352688214593322121/",
-            "https://www.pinterest.com/pin/352688214593322121/sent/?invite_code=abc123&sfo=1",
-            "http://www.pinterest.fr/pin/352688214593322121/?utm_source=x",
+            "https://www.pinterest.com/pin/700100200300400500/",
+            "https://pinterest.com/pin/700100200300400500",
+            "https://tr.pinterest.com/pin/some-title-here--700100200300400500/",
+            "https://www.pinterest.co.uk/pin/700100200300400500/",
+            "https://uk.pinterest.com/pin/700100200300400500/",
+            "https://www.pinterest.com/pin/700100200300400500/sent/?invite_code=abc123&sfo=1",
+            "http://www.pinterest.fr/pin/700100200300400500/?utm_source=x",
         ] {
-            #expect(source.identify(URL(string: link)!) == "352688214593322121", "\(link)")
+            #expect(source.identify(URL(string: link)!) == "700100200300400500", "\(link)")
         }
     }
 
@@ -144,10 +157,10 @@ struct PinterestTests {
 
         for link in [
             "https://www.pinterest.com/pin/create/button/", "https://www.pinterest.com/someone/boards/",
-            "https://notpinterest.com/pin/352688214593322121/", "https://pinterest.co.uk.ab/pin/352688214593322121/",
-            "https://pinterest.com.evil.test/pin/352688214593322121/",
+            "https://notpinterest.com/pin/700100200300400500/", "https://pinterest.co.uk.ab/pin/700100200300400500/",
+            "https://pinterest.com.evil.test/pin/700100200300400500/",
             "https://www.pinterest.com/pin/abc--/", "https://i.pinimg.com/736x/not/a/hash.jpg",
-            "https://example.com/pin/352688214593322121/", "https://www.youtube.com/watch?v=8jPQjjsBbIc",
+            "https://example.com/pin/700100200300400500/", "https://www.youtube.com/watch?v=8jPQjjsBbIc",
         ] {
             #expect(source.identify(URL(string: link)!) == nil, "\(link)")
         }
@@ -162,7 +175,9 @@ struct PinterestTests {
         }
         let expanded = try await source.expand(URL(string: "https://pin.it/abc123")!)
         #expect(expanded == Fake.pin)
-        #expect(router.requests == ["GET https://api.pinterest.com/url_shortener/abc123/redirect/"])
+        #expect(
+            router.requests == ["GET https://api.pinterest.com/url_shortener/abc123/redirect/"],
+            "the redirect is read, never followed")
 
         let (board, _) = Fake.source { _ in
             .init(status: 302, headers: ["Location": "https://www.pinterest.com/someone/"])
@@ -266,11 +281,16 @@ struct PinterestTests {
         #expect(!capture.media.contains { $0.url.pathExtension == "mp3" })
         #expect(capture.summary == "a hand holding a pencil\n\nStep three")
         #expect(capture.duration == 20)
-        #expect(router.count("HEAD") == 15, "three mp4 copies of each of five clips")
+        #expect(router.count("HEAD") == 16, "three mp4 copies of each of five clips, and the guessed photo")
     }
 
     @Test func aCarouselIsItsSlidesAtOriginalSize() async throws {
         let (source, _) = Fake.source { request in
+            if request.httpMethod == "HEAD" {
+                // The second slide's original is a PNG: the guessed .jpg is refused.
+                let wrong = request.url?.path().contains(Fake.hash(21)) == true && request.url?.pathExtension == "jpg"
+                return .init(status: wrong ? 403 : 200)
+            }
             guard Fake.isAPI(request) else { return nil }
             return Fake.api([
                 "id": "111222333", "title": "Invented slides",
@@ -284,7 +304,10 @@ struct PinterestTests {
             ])
         }
         let capture = try await source.fetch(Fake.pin)
-        #expect(capture.media.map(\.url.absoluteString) == [Fake.image("originals", 20), Fake.image("originals", 21)])
+        #expect(
+            capture.media.map(\.url.absoluteString) == [
+                Fake.image("originals", 20), Fake.image("originals", 21, "png"),
+            ])
     }
 
     @Test func aClipOfferedOnlyAsAStreamSaysSo() async throws {
@@ -293,14 +316,49 @@ struct PinterestTests {
             return Fake.api([
                 "id": "111222333",
                 "videos": ["video_list": ["V_HLSV4": Fake.entry(Fake.clip("hls", 30, ext: "m3u8"))]],
+                "images": ["orig": ["url": Fake.image("originals", 31), "width": 736, "height": 1308]],
+            ])
+        }
+        let sentence = "This clip is only offered as a stream Nab can't save yet."
+        do {
+            _ = try await source.fetch(Fake.pin)
+            Issue.record("a stream-only clip must not be fetched as its cover photo")
+        } catch {
+            #expect(error.localizedDescription == sentence)
+        }
+
+        let (idea, _) = Fake.source { request in
+            guard Fake.isAPI(request) else { return nil }
+            let pages = (0..<3).map { page in
+                ["blocks": [["type": "story_pin_video_block", "video": Fake.streamClip(32 + page)]]]
+            }
+            return Fake.api([
+                "id": "111222333", "story_pin_data": ["pages": pages],
+                "images": ["orig": ["url": Fake.image("originals", 31), "width": 736, "height": 1308]],
             ])
         }
         do {
-            _ = try await source.fetch(Fake.pin)
-            Issue.record("a stream-only clip must not be fetched as a photo")
+            _ = try await idea.fetch(Fake.pin)
+            Issue.record("an idea pin of streams must not be fetched as its cover photo")
         } catch {
-            #expect(error.localizedDescription == "This clip is only offered as a stream Nab can't save yet.")
+            #expect(error.localizedDescription == sentence)
         }
+    }
+
+    @Test func partlyStreamOnlyPinIsSavedWithANoteSayingWhatIsMissing() async throws {
+        let (source, _) = Fake.source { request in
+            if request.httpMethod == "HEAD" { return .init(status: 200, headers: ["Content-Length": "5000"]) }
+            guard Fake.isAPI(request) else { return nil }
+            let pages = (0..<5).map { page -> [String: Any] in
+                let clip = page == 1 || page == 3 ? Fake.streamClip(40 + page) : Fake.ideaClip(40 + page)
+                return ["blocks": [["type": "story_pin_video_block", "video": clip]]]
+            }
+            return Fake.api(["id": "111222333", "title": "Invented idea", "story_pin_data": ["pages": pages]])
+        }
+        let capture = try await source.fetch(Fake.pin)
+        #expect(capture.media.count == 3)
+        #expect(capture.note == "2 of 5 clips can't be saved")
+        #expect(RackText.kindLine(capture) == "3 videos · 2 of 5 clips can't be saved")
     }
 
     // MARK: When the API says no
@@ -363,7 +421,18 @@ struct PinterestTests {
         #expect(
             PinterestPin.choose(all.filter { $0.name.hasPrefix("V_EXP") && $0.name != "V_EXP7" }, sizes: [:])?.name
                 == "V_EXP6")
-        #expect(PinterestPin.choose(all, sizes: ["V_EXP3": 5, "V_EXP4": 9])?.name == "V_EXP4")
+        let others = all.filter { ["V_EXP3", "V_EXP4"].contains($0.name) }
+        #expect(PinterestPin.choose(others, sizes: ["V_EXP3": 5, "V_EXP4": 9])?.name == "V_EXP4")
+    }
+
+    @Test func aCopyWhoseSizeIsUnknownStaysInTheRunningWhenItsNameRanksHigher() {
+        func variant(_ name: String) -> PinterestPin.Variant {
+            .init(name: name, url: URL(string: Fake.clip("720p", 62))!)
+        }
+        let all = ["V_EXP3", "V_EXP6", "V_EXP7"].map(variant)
+        #expect(PinterestPin.choose(all, sizes: ["V_EXP3": 195_148, "V_EXP6": 322_254])?.name == "V_EXP7")
+        #expect(PinterestPin.choose(all, sizes: ["V_EXP3": 195_148, "V_EXP7": 417_464])?.name == "V_EXP7")
+        #expect(PinterestPin.choose(all, sizes: ["V_EXP3": 900, "V_EXP6": 9_000, "V_EXP7": 100])?.name == "V_EXP6")
     }
 
     @Test func addressesOutsidePinimgAreNeverTrusted() async throws {
@@ -414,25 +483,102 @@ struct PinterestTests {
 
     // MARK: Saving
 
-    @Test func aRefusedOriginalFallsBackToTheSmallerCopies() async throws {
+    @Test func aDirectLinkIsFoundAtItsLargestCopyAndNamedForWhatItIs() async throws {
+        let link = URL(string: Fake.image("736x", 90))!
+        let (png, router) = Fake.source { request in
+            let wrong = request.url?.pathComponents[1] == "originals" && request.url?.pathExtension == "jpg"
+            return .init(status: wrong ? 403 : 200)
+        }
+        let capture = try await png.fetch(link)
+        #expect(capture.media.map(\.url.absoluteString) == [Fake.image("originals", 90, "png")])
+        #expect(capture.title == Fake.hash(90))
+        #expect(MediaFileName.names(for: capture, sourceName: "Pinterest").first?.hasSuffix(".png") == true)
+        #expect(
+            router.requests.map { URL(string: String($0.dropFirst(5)))!.lastPathComponent.suffix(3) } == ["jpg", "png"])
+
+        let (small, _) = Fake.source { request in .init(status: request.url?.pathComponents[1] == "736x" ? 200 : 403) }
+        let capture2 = try await small.fetch(link)
+        #expect(capture2.media.map(\.url.absoluteString) == [Fake.image("736x", 90)])
+
+        let (none, _) = Fake.source { _ in .init(status: 403) }
+        await #expect(throws: NabError.self) { try await none.fetch(link) }
+    }
+
+    @Test func aRefusedOriginalFallsBackToTheSmallerCopiesWhenSaving() async throws {
         let folder = FileManager.default.temporaryDirectory.appending(path: "nab-pin-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: folder) }
-        let direct = URL(string: Fake.image("736x", 90))!
         let (source, router) = Fake.source { request in
             let path = request.url?.path() ?? ""
             if path.hasPrefix("/originals/") || path.hasPrefix("/1200x/") { return .init(status: 403) }
             return .init(status: 200, body: Data(repeating: 7, count: 321))
         }
-        let capture = try await source.fetch(direct)
-        #expect(capture.media.map(\.url.absoluteString) == [Fake.image("originals", 90)])
-        #expect(capture.title == "Pinterest image")
-        try await source.save(capture.media[0], of: capture, to: folder.appending(path: "a.jpg"), progress: { _, _ in })
-        let written = try Data(contentsOf: folder.appending(path: "a.jpg"))
-        #expect(written.count == 321)
+        let media = Media(kind: .image, url: URL(string: Fake.image("originals", 91))!)
+        let capture = Capture(
+            source: .pinterest, sourceID: "1", url: Fake.pin, title: "t", media: [media])
+        try await source.save(media, of: capture, to: folder.appending(path: "a.jpg"), progress: { _, _ in })
+        #expect(try Data(contentsOf: folder.appending(path: "a.jpg")).count == 321)
         #expect(
             router.requests.map { URL(string: String($0.dropFirst(4)))!.pathComponents[1] } == [
                 "originals", "1200x", "736x",
             ])
+    }
+
+    @Test(.timeLimit(.minutes(1))) func downloadsInProgressDoNotHoldBackTheNextPin() async throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: "nab-pin-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let (source, _) = Fake.source { request in
+            if request.url?.host() == "i.pinimg.com" { return .init(status: 0) }  // the download never ends
+            guard Fake.isAPI(request) else { return nil }
+            return Fake.api([
+                "id": "111222333", "title": "Next pin",
+                "images": ["orig": ["url": Fake.image("originals", 92, "png"), "width": 10, "height": 10]],
+            ])
+        }
+        let media = Media(kind: .image, url: URL(string: Fake.image("originals", 93, "png"))!)
+        let capture = Capture(source: .pinterest, sourceID: "1", url: Fake.pin, title: "t", media: [media])
+        // More downloads than the details gate has places (8): if saving held a place, none would be left.
+        let saves = (0..<10).map { index in
+            Task {
+                try await source.save(
+                    media, of: capture, to: folder.appending(path: "s\(index).png"), progress: { _, _ in })
+            }
+        }
+        try await Task.sleep(for: .milliseconds(300))
+        let title = try await withThrowingTaskGroup(of: String.self) { group in
+            group.addTask { try await source.fetch(Fake.pin).title }
+            group.addTask {
+                try await Task.sleep(for: .seconds(3))
+                throw NabError("the next pin was held back by downloads")
+            }
+            defer { group.cancelAll() }
+            return try await group.next()!
+        }
+        #expect(title == "Next pin")
+        for save in saves { save.cancel() }
+    }
+
+    @Test func aNoteSurvivesTheLibraryFileAndOldFilesStillOpen() throws {
+        var capture = Capture(source: .pinterest, sourceID: "1", url: Fake.pin, title: "t")
+        capture.note = "1 of 2 clips can't be saved"
+        let data = try JSONEncoder().encode(capture)
+        #expect(try JSONDecoder().decode(Capture.self, from: data).note == capture.note)
+
+        var old = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        old["note"] = nil
+        let reopened = try JSONDecoder().decode(Capture.self, from: JSONSerialization.data(withJSONObject: old))
+        #expect(reopened.note == nil)
+    }
+
+    @Test func pinterestSessionsRefuseCookies() {
+        for config in [
+            URLSession.nab.configuration, PinterestSource.cookielessDetails.configuration,
+        ].map({ PinterestSource.cookieless($0) }) {
+            #expect(!config.httpShouldSetCookies)
+            #expect(config.httpCookieAcceptPolicy == .never)
+            #expect(config.httpCookieStorage == nil)
+        }
+        #expect(!PinterestSource.cookielessDetails.configuration.httpShouldSetCookies)
+        #expect(PinterestSource.cookielessDetails.configuration.httpCookieStorage == nil)
     }
 }
 
