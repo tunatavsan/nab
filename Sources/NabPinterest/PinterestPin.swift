@@ -52,6 +52,17 @@ struct PinterestPin: Sendable {
         return unknown.max(by: byName) ?? top
     }
 
+    /// Every copy that was not refused, best first: the order to try them in when the best one fails.
+    static func ordered(_ variants: [Variant], sizes: [String: Int64], refused: Set<String> = []) -> [Variant] {
+        var left = variants.filter { !refused.contains($0.name) }
+        var result: [Variant] = []
+        while let next = choose(left, sizes: sizes) {
+            result.append(next)
+            left.removeAll { $0.name == next.name }
+        }
+        return result
+    }
+
     private static func rank(_ variant: Variant) -> Int {
         let name = variant.name.uppercased()
         if name == "V_EXP7" { return 100 }
@@ -255,9 +266,11 @@ struct PinterestPin: Sendable {
         var image: URL?
         var video: Variant?
         var poster: URL?
+        var sawVideo = false
         for object in jsonLD(in: html) {
             switch object["@type"] as? String {
             case "VideoObject":
+                sawVideo = true
                 if let url = safeURL(object["contentUrl"]), url.pathExtension.lowercased() == "mp4" {
                     video = Variant(
                         name: "ld", url: url, width: pixels(object["width"]), height: pixels(object["height"]),
@@ -279,6 +292,9 @@ struct PinterestPin: Sendable {
             default: break
             }
         }
+        // As on the API path, a page that shows a clip we cannot take says so; its cover stands in only when the page
+        // has no clip at all.
+        if video == nil, sawVideo { throw streamOnly }
         if video == nil, image == nil { image = safeURL(metaContent("og:image", in: html)) }
         title = title ?? text(metaContent("og:title", in: html), limit: 300)
         let slots: [Slot]

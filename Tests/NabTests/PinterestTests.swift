@@ -1,6 +1,8 @@
 import Foundation
+import ImageIO
 import NabCore
 import Testing
+import UniformTypeIdentifiers
 
 @testable import NabPinterest
 
@@ -114,12 +116,30 @@ private enum Fake {
 
     static func isAPI(_ request: URLRequest) -> Bool { request.url?.path() == "/resource/PinResource/get/" }
 
-    static func source(_ handler: @escaping @Sendable (URLRequest) -> PinterestStub.Reply?) -> (
-        PinterestSource, PinterestStub.Router
-    ) {
+    static func source(
+        backoff: Duration = .milliseconds(1), _ handler: @escaping @Sendable (URLRequest) -> PinterestStub.Reply?
+    ) -> (PinterestSource, PinterestStub.Router) {
         let (session, router) = PinterestStub.session(handler)
         let downloader = MediaDownloader(session: session, attempts: 1, backoff: .milliseconds(1))
-        return (PinterestSource(session: session, downloader: downloader, backoff: .milliseconds(1)), router)
+        return (PinterestSource(session: session, downloader: downloader, backoff: backoff), router)
+    }
+
+    /// The pin id an API request asks for.
+    static func askedID(_ request: URLRequest) -> String {
+        let query = request.url?.query(percentEncoded: false) ?? ""
+        return query.split(separator: "\"").first { $0.allSatisfy(\.isNumber) && $0.count > 3 }.map(String.init) ?? ""
+    }
+
+    /// A real, tiny JPEG.
+    static func jpeg() -> Data {
+        let context = CGContext(
+            data: nil, width: 4, height: 4, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)!
+        let out = NSMutableData()
+        let destination = CGImageDestinationCreateWithData(out, UTType.jpeg.identifier as CFString, 1, nil)!
+        CGImageDestinationAddImage(destination, context.makeImage()!, nil)
+        CGImageDestinationFinalize(destination)
+        return out as Data
     }
 
     static let pin = URL(string: "https://www.pinterest.com/pin/111222333/")!
@@ -579,6 +599,107 @@ struct PinterestTests {
         }
         #expect(!PinterestSource.cookielessDetails.configuration.httpShouldSetCookies)
         #expect(PinterestSource.cookielessDetails.configuration.httpCookieStorage == nil)
+    }
+}
+
+extension PinterestTests {
+    @Test func aPageWhoseClipIsOnlyAStreamSaysSoInsteadOfGivingItsCover() async throws {
+        let cover = Fake.image("736x", 100)
+        let page = """
+            <html><head><meta property="og:image" content="\(cover)"/>
+            <script type="application/ld+json">{"@type":"SocialMediaPosting","headline":"h","image":"\(Fake.image("originals", 100))"}</script>
+            <script type="application/ld+json">{"@type":"VideoObject","name":"n","contentUrl":"\(Fake.clip("hls", 100, ext: "m3u8"))"}</script>
+            </head></html>
+            """
+        let (source, _) = Fake.source { request in Fake.isAPI(request) ? .init(status: 403) : Fake.html(page) }
+        do {
+            _ = try await source.fetch(Fake.pin)
+            Issue.record("a stream-only page must not be saved as its cover photo")
+        } catch {
+            #expect(error.localizedDescription == "This clip is only offered as a stream Nab can't save yet.")
+        }
+    }
+
+    @Test func aCopyThatTheServerRefusesIsNotChosen() async throws {
+        let (source, _) = Fake.source { request in
+            if request.httpMethod == "HEAD" {
+                let path = request.url?.path() ?? ""
+                if path.contains("/720p/") { return .init(status: 403) }
+                return .init(status: 200, headers: ["Content-Length": path.contains("_t4") ? "9000" : "100"])
+            }
+            guard Fake.isAPI(request) else { return nil }
+            return Fake.api(["id": "111222333", "videos": ["video_list": Fake.ideaClip(101)["video_list"]!]])
+        }
+        let capture = try await source.fetch(Fake.pin)
+        #expect(capture.media.map(\.url.absoluteString) == [Fake.clip("expMp4", 101, suffix: "_t4")])
+    }
+
+    @Test func aClipRefusedWhenSavingDropsToTheNextCopy() async throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: "nab-pin-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let (source, router) = Fake.source { request in
+            let path = request.url?.path() ?? ""
+            if request.httpMethod == "HEAD" {
+                let size = path.contains("/720p/") ? "9000" : path.contains("_t4") ? "5000" : "100"
+                return .init(status: 200, headers: ["Content-Length": size])
+            }
+            if Fake.isAPI(request) {
+                return Fake.api(["id": "111222333", "videos": ["video_list": Fake.ideaClip(102)["video_list"]!]])
+            }
+            return path.contains("/720p/")
+                ? .init(status: 403) : .init(status: 200, body: Data(repeating: 3, count: 77))
+        }
+        let capture = try await source.fetch(Fake.pin)
+        #expect(capture.media.first?.url.absoluteString == Fake.clip("720p", 102))
+        let file = folder.appending(path: "clip.mp4")
+        try await source.save(capture.media[0], of: capture, to: file, progress: { _, _ in })
+        #expect(try Data(contentsOf: file).count == 77)
+        #expect(router.requests.filter { $0.hasPrefix("GET https://v1") }.count == 2)
+    }
+
+    @Test(.timeLimit(.minutes(1))) func aBusyWaitHoldsNoPlaceInTheGate() async throws {
+        let (source, _) = Fake.source(backoff: .seconds(4)) { request in
+            guard Fake.isAPI(request) else { return nil }
+            if Fake.askedID(request).hasPrefix("9") { return .init(status: 503) }
+            return Fake.api([
+                "id": "111222333", "title": "Free pin",
+                "images": ["orig": ["url": Fake.image("originals", 103), "width": 10, "height": 10]],
+            ])
+        }
+        // Eight pins that Pinterest says are busy: all eight are waiting out their back-off, not working.
+        let busy = (0..<8).map { index in
+            Task { try await source.fetch(URL(string: "https://www.pinterest.com/pin/9000000000\(index)/")!) }
+        }
+        try await Task.sleep(for: .milliseconds(400))
+        let title = try await withThrowingTaskGroup(of: String.self) { group in
+            group.addTask { try await source.fetch(Fake.pin).title }
+            group.addTask {
+                try await Task.sleep(for: .seconds(3))
+                throw NabError("a request was held back by others that were only waiting")
+            }
+            defer { group.cancelAll() }
+            return try await group.next()!
+        }
+        #expect(title == "Free pin")
+        for task in busy { task.cancel() }
+    }
+
+    @Test func aCopyFetchedInPlaceOfAnotherIsSavedUnderItsOwnType() async throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: "nab-pin-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let jpeg = Fake.jpeg()
+        // The HEAD said the PNG original is there; the file itself is refused, so the 1200-wide JPEG arrives.
+        let (source, _) = Fake.source { request in
+            if request.httpMethod == "HEAD" { return .init(status: 200) }
+            return request.url?.path().hasPrefix("/originals/") == true
+                ? .init(status: 403) : .init(status: 200, body: jpeg)
+        }
+        let media = Media(kind: .image, url: URL(string: Fake.image("originals", 104, "png"))!)
+        let capture = Capture(source: .pinterest, sourceID: "1", url: Fake.pin, title: "t", media: [media])
+        let stored = try await source.store(media, of: capture, at: folder.appending(path: "photo (Pinterest 1).png"))
+        #expect(stored.savedURL?.pathExtension == "jpg")
+        #expect(try Data(contentsOf: #require(stored.savedURL)).prefix(2) == Data([0xFF, 0xD8]))
+        #expect(!FileManager.default.fileExists(atPath: folder.appending(path: "photo (Pinterest 1).png").path))
     }
 }
 

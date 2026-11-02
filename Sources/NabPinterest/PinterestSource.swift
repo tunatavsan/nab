@@ -17,6 +17,7 @@ public struct PinterestSource: SourceProvider {
     private let downloader: MediaDownloader
     private let backoff: Duration
     private let gate = Gate(limit: 8)
+    private let alternates = Alternates()
 
     static let userAgent =
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
@@ -108,7 +109,7 @@ public struct PinterestSource: SourceProvider {
         let candidates =
             extensions.compactMap { PinterestURL.imageURL(size: "originals", hash: image.hash, ext: $0) }
             + ["1200x", "736x"].compactMap { PinterestURL.imageURL(size: $0, hash: image.hash, ext: "jpg") }
-        for candidate in candidates where await head(candidate) != nil { return candidate }
+        for candidate in candidates where await exists(candidate) { return candidate }
         return nil
     }
 
@@ -165,7 +166,7 @@ public struct PinterestSource: SourceProvider {
                         found.url = copy
                         return (index, found)
                     case .video(let variants):
-                        guard let best = await self.best(of: variants) else { throw PinterestPin.changed }
+                        let best = try await self.best(of: variants)
                         return (
                             index,
                             Media(
@@ -181,33 +182,48 @@ public struct PinterestSource: SourceProvider {
         }
     }
 
-    private func best(of variants: [PinterestPin.Variant]) async -> PinterestPin.Variant? {
-        if variants.count == 1 { return variants.first }
+    /// The copy to save. The others are remembered, best first, for `save` to fall back on if Pinterest refuses
+    /// the best when the file is asked for.
+    private func best(of variants: [PinterestPin.Variant]) async throws -> PinterestPin.Variant {
+        if variants.count == 1, let only = variants.first { return only }
         var sizes: [String: Int64] = [:]
-        await withTaskGroup(of: (String, Int64?).self) { group in
+        var refused = Set<String>()
+        await withTaskGroup(of: (String, HTTPURLResponse?).self) { group in
             for variant in variants {
-                group.addTask { (variant.name, await self.length(of: variant.url)) }
+                group.addTask { (variant.name, await self.head(variant.url)) }
             }
-            for await (name, size) in group { if let size { sizes[name] = size } }
+            for await (name, answer) in group {
+                guard let answer else { continue }
+                if (200..<300).contains(answer.statusCode) {
+                    if let text = answer.value(forHTTPHeaderField: "Content-Length"), let size = Int64(text), size > 0 {
+                        sizes[name] = size
+                    }
+                } else if Self.isRefusal(answer.statusCode) {
+                    refused.insert(name)
+                }
+            }
         }
-        return PinterestPin.choose(variants, sizes: sizes)
+        let order = PinterestPin.ordered(variants, sizes: sizes, refused: refused)
+        guard let first = order.first else { throw NabError("Pinterest refused every copy of this clip.") }
+        alternates.remember(order.dropFirst().map(\.url), after: first.url)
+        return first
     }
 
-    /// The answer to a HEAD when the address is there (2xx), else nil.
+    /// A 4xx that is about this address (not "slow down"): the next copy may still be there.
+    static func isRefusal(_ status: Int) -> Bool { (400..<500).contains(status) && status != 429 }
+
+    /// The answer to a HEAD, whatever it says; nil when there was none.
     private func head(_ url: URL) async -> HTTPURLResponse? {
         var request = URLRequest(url: url)
         request.httpMethod = "HEAD"
         request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
-        guard let (_, response) = try? await send(request), (200..<300).contains(response.statusCode) else {
-            return nil
-        }
-        return response
+        return try? await send(request).1
     }
 
-    private func length(of url: URL) async -> Int64? {
-        guard let text = await head(url)?.value(forHTTPHeaderField: "Content-Length"), let size = Int64(text), size > 0
-        else { return nil }
-        return size
+    /// Whether the address is there (2xx).
+    private func exists(_ url: URL) async -> Bool {
+        guard let answer = await head(url) else { return false }
+        return (200..<300).contains(answer.statusCode)
     }
 
     // MARK: Saving
@@ -218,7 +234,7 @@ public struct PinterestSource: SourceProvider {
         _ media: Media, of capture: Capture, to file: URL,
         progress: @escaping @Sendable (_ received: Int64, _ expected: Int64?) -> Void
     ) async throws {
-        var urls = [media.url]
+        var urls = [media.url] + (media.kind == .video ? alternates.after(media.url) : [])
         if media.kind == .image, let image = PinterestURL.image(in: media.url),
             media.url.pathComponents.dropFirst().first == "originals"
         {
@@ -231,31 +247,43 @@ public struct PinterestSource: SourceProvider {
                 // the slowest download.
                 try await downloader.download(url, to: file, headers: headers, progress: progress)
                 return
-            } catch let error as HTTPStatusError where error.status == 403 && index < urls.count - 1 {
+            } catch let error as HTTPStatusError where Self.isRefusal(error.status) && index < urls.count - 1 {
                 continue
             }
         }
         throw HTTPStatusError(status: 403)
     }
 
+    /// The other copies of each clip, remembered from the fetch to the save.
+    private final class Alternates: @unchecked Sendable {
+        private let lock = NSLock()
+        private var later: [URL: [URL]] = [:]
+        func remember(_ urls: [URL], after url: URL) { lock.withLock { later[url] = urls } }
+        func after(_ url: URL) -> [URL] { lock.withLock { later[url] ?? [] } }
+    }
+
     // MARK: Requests
 
+    /// One request, asked again after a growing wait when Pinterest says it is busy. The wait is outside the gate:
+    /// a request that is only waiting holds no place, so others go on.
     private func send(_ request: URLRequest, delegate: (any URLSessionTaskDelegate)? = nil) async throws -> (
         Data, HTTPURLResponse
     ) {
-        try await gate.run {
-            var attempt = 1
-            while true {
-                let (data, response) = try await session.data(for: request, delegate: delegate)
-                guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
-                if [429, 503].contains(http.statusCode), attempt < Self.attempts {
-                    try await Task.sleep(for: backoff * (1 << (attempt - 1)))
-                    attempt += 1
-                    continue
-                }
-                return (data, http)
-            }
+        var attempt = 1
+        while true {
+            let (data, http) = try await gate.run { try await self.once(request, delegate: delegate) }
+            guard [429, 503].contains(http.statusCode), attempt < Self.attempts else { return (data, http) }
+            try await Task.sleep(for: backoff * (1 << (attempt - 1)))
+            attempt += 1
         }
+    }
+
+    private func once(_ request: URLRequest, delegate: (any URLSessionTaskDelegate)?) async throws -> (
+        Data, HTTPURLResponse
+    ) {
+        let (data, response) = try await session.data(for: request, delegate: delegate)
+        guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+        return (data, http)
     }
 }
 
