@@ -18,8 +18,13 @@ public protocol SourceProvider: Sendable {
     func covers(forID id: String) -> [URL]
     /// A link that opens the item at a moment.
     func link(to capture: Capture, at seconds: TimeInterval) -> URL
-    /// Writes one photo or clip to `file`. The default streams `media.url` to disk through the shared downloader.
-    func save(_ media: Media, to file: URL, progress: @escaping @Sendable (Double) -> Void) async throws -> Int64
+    /// Writes one photo or clip of `capture` to `file`; `capture` lets a source resolve an address that has expired.
+    /// The default streams `media.url` to disk through the shared downloader. `progress` gets the bytes received and,
+    /// when the server says, the bytes expected.
+    func save(
+        _ media: Media, of capture: Capture, to file: URL,
+        progress: @escaping @Sendable (_ received: Int64, _ expected: Int64?) -> Void
+    ) async throws
 }
 
 extension SourceProvider {
@@ -28,8 +33,10 @@ extension SourceProvider {
     public func expand(_ url: URL) async throws -> URL { url }
     public func covers(forID id: String) -> [URL] { [] }
     public func link(to capture: Capture, at seconds: TimeInterval) -> URL { capture.url }
-    public func save(_ media: Media, to file: URL, progress: @escaping @Sendable (Double) -> Void) async throws -> Int64
-    {
+    public func save(
+        _ media: Media, of capture: Capture, to file: URL,
+        progress: @escaping @Sendable (_ received: Int64, _ expected: Int64?) -> Void
+    ) async throws {
         try await MediaDownloader.shared.download(media.url, to: file, progress: progress)
     }
 }

@@ -106,9 +106,10 @@ public final class MediaDownloader: Sendable {
     /// next to the target, and takes the real name in one rename, so a half-written file never sits under it.
     /// 429 and 503 are retried after a growing wait (`attempts` tries in all). Cancelling the calling task stops the
     /// transfer and leaves no partial file behind.
+    @discardableResult
     public func download(
         _ url: URL, to file: URL, headers: [String: String] = [:],
-        progress: @escaping @Sendable (Double) -> Void = { _ in }
+        progress: @escaping @Sendable (_ received: Int64, _ expected: Int64?) -> Void = { _, _ in }
     ) async throws -> Int64 {
         try await gate.run {
             var attempt = 1
@@ -124,7 +125,8 @@ public final class MediaDownloader: Sendable {
     }
 
     private func transfer(
-        _ url: URL, to file: URL, headers: [String: String], progress: @escaping @Sendable (Double) -> Void
+        _ url: URL, to file: URL, headers: [String: String],
+        progress: @escaping @Sendable (_ received: Int64, _ expected: Int64?) -> Void
     ) async throws -> Int64 {
         var request = URLRequest(url: url)
         for (field, value) in headers { request.setValue(value, forHTTPHeaderField: field) }
@@ -149,38 +151,41 @@ public final class MediaDownloader: Sendable {
             try? fm.removeItem(at: partial)
             throw error
         }
-        progress(1)
-        let size = (try? fm.attributesOfItem(atPath: file.path)[.size] as? NSNumber)?.int64Value
-        return size ?? 0
+        let size = (try? fm.attributesOfItem(atPath: file.path)[.size] as? NSNumber)?.int64Value ?? 0
+        progress(size, size)
+        return size
     }
 
     /// `photo.png.partial`: the name a file has while it is still arriving.
     public static func partialFile(for file: URL) -> URL { file.appendingPathExtension("partial") }
 }
 
-/// Reports a download's progress as it arrives, at most once per percent.
+/// Reports a download's bytes as they arrive, at most once per percent.
 private final class ProgressWatcher: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
-    private let report: @Sendable (Double) -> Void
+    private let report: @Sendable (Int64, Int64?) -> Void
     private let lock = NSLock()
     private var observation: NSKeyValueObservation?
     private var last = -1.0
 
-    init(_ report: @escaping @Sendable (Double) -> Void) { self.report = report }
+    init(_ report: @escaping @Sendable (Int64, Int64?) -> Void) { self.report = report }
 
     func urlSession(_ session: URLSession, didCreateTask task: URLSessionTask) {
-        let observation = task.progress.observe(\.fractionCompleted) { [weak self] progress, _ in
-            self?.update(progress.fractionCompleted)
+        let observation = task.progress.observe(\.fractionCompleted) { [weak self, weak task] progress, _ in
+            guard let task else { return }
+            self?.update(
+                progress.fractionCompleted, received: task.countOfBytesReceived,
+                expected: task.countOfBytesExpectedToReceive)
         }
         lock.withLock { self.observation = observation }
     }
 
-    private func update(_ fraction: Double) {
+    private func update(_ fraction: Double, received: Int64, expected: Int64) {
         let send = lock.withLock {
             guard fraction - last >= 0.01, fraction < 1 else { return false }
             last = fraction
             return true
         }
-        if send { report(fraction) }
+        if send { report(received, expected > 0 ? expected : nil) }
     }
 
     func stop() {
