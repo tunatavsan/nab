@@ -60,10 +60,10 @@ public enum RackText {
         "Nab reads \(list(names)) links."
     }
 
-    /// "a", "a and b", "a, b and c".
-    public static func list(_ items: [String]) -> String {
+    /// "a", "a and b", "a, b and c" (or "a or b").
+    public static func list(_ items: [String], _ conjunction: String = "and") -> String {
         guard items.count > 1 else { return items.first ?? "" }
-        return items.dropLast().joined(separator: ", ") + " and " + items[items.count - 1]
+        return items.dropLast().joined(separator: ", ") + " \(conjunction) " + items[items.count - 1]
     }
 
     private static func noun(_ n: Int, _ word: String) -> String? { n > 0 ? "\(n) \(word)\(n == 1 ? "" : "s")" : nil }

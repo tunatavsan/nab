@@ -742,9 +742,20 @@ extension Entry {
 // MARK: Output
 
 enum Pasteboard {
+    /// The clipboard Nab reads and writes. A debug build run with `NAB_PASTEBOARD=<name>` uses a private pasteboard
+    /// of that name instead, so a test run never reads or replaces the user's clipboard.
+    static var board: NSPasteboard {
+        #if DEBUG
+            if let name = ProcessInfo.processInfo.environment["NAB_PASTEBOARD"], !name.isEmpty {
+                return NSPasteboard(name: NSPasteboard.Name(name))
+            }
+        #endif
+        return .general
+    }
+
     static func copy(_ text: String) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
+        board.clearContents()
+        board.setString(text, forType: .string)
     }
 }
 

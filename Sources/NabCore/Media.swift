@@ -18,6 +18,21 @@ public enum MediaFolder {
         }
         return downloads.appending(path: "Nab", directoryHint: .isDirectory)
     }
+
+    /// Half-arrived files Nab left in `folder` when it quit mid-download: `….partial` under one of Nab's own names
+    /// (`Title (Pinterest 123).png.partial`). Anything else in the folder is the user's and is never touched.
+    public static func leftovers(
+        in folder: URL, sourceNames: [String], fileManager: FileManager = .default
+    ) -> [URL] {
+        let names = (try? fileManager.contentsOfDirectory(atPath: folder.path)) ?? []
+        return
+            names
+            .filter { name in
+                name.hasSuffix(".partial") && sourceNames.contains { name.contains(" (\($0) ") }
+            }
+            .sorted()
+            .map { folder.appending(path: $0) }
+    }
 }
 
 /// File names a person can read that still say where the file came from: `Title (Pinterest 123).png`, and
