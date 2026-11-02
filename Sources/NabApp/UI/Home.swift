@@ -19,7 +19,7 @@ struct HomePage: View {
             if Onboarding.opensAutomatically(libraryIsEmpty: true, seenVersion: onboardingSeen) {
                 OnboardingView(model: model)
             } else {
-                FirstRunView(model: model)
+                FirstRunView(model: model).libraryCell()
             }
         } else {
             let layout = HomeLayout.build(
@@ -37,6 +37,7 @@ struct HomePage: View {
                 .padding(.vertical, Space.xl)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .libraryCell()
             .onGeometryChange(for: CGFloat.self) {
                 $0.size.width
             } action: {

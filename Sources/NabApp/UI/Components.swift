@@ -26,6 +26,57 @@ private struct RingGlass: ViewModifier {
     }
 }
 
+// MARK: Library surfaces
+
+extension View {
+    /// The library window's ground: Liquid Glass with the panel ring's tint, the desktop showing through. With
+    /// Reduce Transparency on it is the solid window color.
+    func libraryGround() -> some View { modifier(LibraryGround()) }
+
+    /// A region of a library page, a glass cell like the panel's. `reading` adds the reading tint behind long text.
+    /// With Reduce Transparency on it is a solid surface with a hairline. The one place that fallback is decided.
+    func libraryCell(reading: Bool = false, radius: CGFloat = Radius.cell) -> some View {
+        modifier(LibraryCell(reading: reading, radius: radius))
+    }
+}
+
+private struct LibraryGround: ViewModifier {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    func body(content: Content) -> some View {
+        content.background {
+            Group {
+                if reduceTransparency {
+                    Rectangle().fill(Palette.window)
+                } else {
+                    Color.clear.glassEffect(.regular.tint(Palette.groundTint), in: .rect)
+                }
+            }
+            .ignoresSafeArea()
+        }
+    }
+}
+
+private struct LibraryCell: ViewModifier {
+    let reading: Bool
+    let radius: CGFloat
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+        if reduceTransparency {
+            content
+                .clipShape(shape)
+                .background(Palette.surface, in: shape)
+                .overlay(shape.strokeBorder(Palette.line))
+        } else {
+            content
+                .clipShape(shape)
+                .glassEffect(reading ? .regular.tint(Palette.readingTint) : .regular, in: shape)
+        }
+    }
+}
+
 // MARK: Text
 
 struct SectionLabel: View {

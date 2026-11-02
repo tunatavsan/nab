@@ -54,7 +54,7 @@ extension AnyTransition {
     /// One view standing in for another (a library page, a chat's intro and its thread): the old one leaves at once
     /// and the new one fades in, so two layouts never blend into each other.
     static var page: AnyTransition {
-        .asymmetric(insertion: .opacity.animation(Motion.pageIn), removal: .identity)
+        .asymmetric(insertion: .probed(.opacity, "page.in").animation(Motion.pageIn), removal: .identity)
     }
 
     /// A side drawer sliding in from the trailing edge.

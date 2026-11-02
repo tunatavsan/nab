@@ -8,7 +8,7 @@ import SwiftUI
 @MainActor
 final class FrameProbe {
     static let shared = FrameProbe()
-    static let enabled = ProcessInfo.processInfo.environment["NAB_FRAME_PROBE"] == "1"
+    nonisolated static let enabled = ProcessInfo.processInfo.environment["NAB_FRAME_PROBE"] == "1"
 
     private var stamps: [CFTimeInterval] = []
     private var label = ""
@@ -54,7 +54,10 @@ final class FrameProbe {
                 Double(drawn) / max(duration / 1000, period), screenHz)
         }
         FileHandle.standardError.write(Data(line.utf8))
-        let log = URL.libraryDirectory.appending(path: "Logs/Nab/frames.log")
+        // A run on its own data folder (NAB_DATA_DIR) logs there, never next to the installed app's log.
+        let log =
+            ProcessInfo.processInfo.environment["NAB_DATA_DIR"].map { URL(filePath: $0).appending(path: "frames.log") }
+            ?? URL.libraryDirectory.appending(path: "Logs/Nab/frames.log")
         try? FileManager.default.createDirectory(at: log.deletingLastPathComponent(), withIntermediateDirectories: true)
         if let handle = try? FileHandle(forWritingTo: log) {
             handle.seekToEndOfFile()
@@ -68,7 +71,7 @@ final class FrameProbe {
 
 /// SwiftUI asks a `GeometryEffect` for its transform on every frame of an animation that moves its
 /// `animatableData`, so each call marks one rendered frame.
-private struct FrameProbeEffect: GeometryEffect {
+struct FrameProbeEffect: GeometryEffect {
     var animatableData: Double
     let label: String
 
@@ -87,5 +90,28 @@ extension View {
     /// No cost unless `NAB_FRAME_PROBE=1`.
     @ViewBuilder func frameProbe(_ label: String, _ value: Double) -> some View {
         if FrameProbe.enabled { modifier(FrameProbeEffect(animatableData: value, label: label)) } else { self }
+    }
+}
+
+extension AnyTransition {
+    /// `transition`, plus a probe that ticks on every frame of its insertion. No cost unless `NAB_FRAME_PROBE=1`.
+    static func probed(_ transition: AnyTransition, _ label: String) -> AnyTransition {
+        guard FrameProbe.enabled else { return transition }
+        return transition.combined(
+            with: .modifier(
+                active: FrameProbeEffect(animatableData: 0, label: label),
+                identity: FrameProbeEffect(animatableData: 1, label: label)))
+    }
+}
+
+extension View {
+    /// Ticks the probe on every frame a scroll view's offset moves. No cost unless `NAB_FRAME_PROBE=1`.
+    @ViewBuilder func scrollProbe(_ label: String) -> some View {
+        if FrameProbe.enabled {
+            onScrollGeometryChange(
+                for: CGFloat.self, of: { $0.contentOffset.y }, action: { _, _ in FrameProbe.shared.tick(label) })
+        } else {
+            self
+        }
     }
 }

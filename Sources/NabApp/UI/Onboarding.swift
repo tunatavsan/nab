@@ -24,6 +24,7 @@ struct OnboardingView: View {
         .frame(width: 560)
         .padding(.vertical, Space.xl)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .libraryCell()
     }
 
     @ViewBuilder private var content: some View {

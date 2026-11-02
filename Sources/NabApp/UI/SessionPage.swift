@@ -24,7 +24,7 @@ struct SessionPage: View {
     private var numbered: [Entry] { entries.filter { $0.capture != nil } }
 
     var body: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: Space.s) {
             VStack(spacing: 0) {
                 SourcesStrip(entries: entries, numbered: numbered, selected: drawerID, copy: model.copyContext) {
                     entry in
@@ -36,6 +36,7 @@ struct SessionPage: View {
                 ChatView(entryIDs: ids, model: model, activeCitation: activeCitation)
             }
             .frame(maxWidth: .infinity)
+            .libraryCell(reading: true)
             if let drawerID, let entry = model.center.entry(drawerID) {
                 TranscriptDrawer(
                     entry: entry, number: numbered.firstIndex { $0.id == drawerID }.map { $0 + 1 }, model: model,
@@ -118,7 +119,6 @@ private struct SourcesStrip: View {
         .padding(.horizontal, Space.xl)
         .padding(.top, Space.s)
         .padding(.bottom, Space.l)
-        .background(Palette.sunken.opacity(0.6))
         .overlay(alignment: .bottom) { Rectangle().fill(Palette.line).frame(height: 1) }
     }
 }

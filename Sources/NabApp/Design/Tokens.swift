@@ -1,18 +1,30 @@
 import AppKit
 import SwiftUI
 
-// Nab's visual language: a solid dark (or light) surface inside the window, glass only on floating layers,
+// Nab's visual language: Liquid Glass wherever Nab draws a surface. The menu bar panel, the rack and the Ask
+// window are glass rings holding glass cells; the library window follows the same language, with the desktop
+// showing through a glass ground and the page's regions as glass cells. The solid window, surface and sunken
+// colors are what those glass layers fall back to when Reduce Transparency is on.
 // DM Sans for words, SF Mono for numbers and shortcuts, neutral inks, and one lime accent that marks
 // the primary action, live work and the current selection. Colors, type, radii and motion come from this
 // folder; one-off layout numbers (a padding, a frame) may stay in the view.
 
 enum Palette {
-    /// Window background and the toolbar area.
+    /// Library window background and the toolbar area, with Reduce Transparency on.
     static let window = dynamic(dark: 0x101216, light: 0xECEEF1)
-    /// The main content card.
+    /// Library cells with Reduce Transparency on.
     static let surface = dynamic(dark: 0x14161B, light: 0xFFFFFF)
-    /// Side columns and the transcript drawer inside the surface.
+    /// Side columns inside the surface.
     static let sunken = dynamic(dark: 0x121419, light: 0xF6F7F8)
+    /// The tint of the library window's glass ground: the same light tint the panel's ring carries
+    /// (black 0.24 in the dark, white 0.34 in the light), so the two read as one material.
+    static let groundTint = dynamic(dark: 0x000000, light: 0xFFFFFF, darkAlpha: 0.24, lightAlpha: 0.34)
+    /// Extra tint for the cells that hold long text (transcript, chat answers, settings). Plain glass lets the
+    /// desktop through at full strength, so a busy wallpaper can fight the words; this darkens (dark) or whitens
+    /// (light) the glass behind them until the secondary ink stays readable on any wallpaper. The light value is
+    /// higher because dark ink on a bright, patterned background loses contrast faster than light ink on a dark
+    /// one. Unmeasured: set without a screenshot, to be tuned against real wallpapers.
+    static let readingTint = dynamic(dark: 0x000000, light: 0xFFFFFF, darkAlpha: 0.30, lightAlpha: 0.45)
     /// Cards and cells on the surface.
     static let raised = dynamic(dark: 0xFFFFFF, light: 0x14181E, darkAlpha: 0.045, lightAlpha: 0.035)
     /// Hairlines and card borders.

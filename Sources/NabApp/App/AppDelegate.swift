@@ -53,8 +53,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             await center.load()
             #if DEBUG
                 FileHandle.standardError.write(Data("Nab keychain service: \(Keychain.service)\n".utf8))
-                // Debug builds only: `NAB_OPEN='nab://…'` handles that URL as if it had been opened.
-                if let raw = ProcessInfo.processInfo.environment["NAB_OPEN"], let url = URL(string: raw) {
+                // Debug builds only: `NAB_OPEN='nab://…'` handles that URL as if it had been opened. Several URLs,
+                // separated by spaces, are handled `NAB_OPEN_GAP` seconds apart (default 1.5): a scripted walk.
+                let env = ProcessInfo.processInfo.environment
+                let gap = env["NAB_OPEN_GAP"].flatMap(Double.init) ?? 1.5
+                for (index, raw) in (env["NAB_OPEN"] ?? "").split(separator: " ").enumerated() {
+                    guard let url = URL(string: String(raw)) else { continue }
+                    if index > 0 { try? await Task.sleep(for: .seconds(gap)) }
                     application(NSApp, open: [url])
                 }
             #endif

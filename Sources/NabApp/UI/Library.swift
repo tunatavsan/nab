@@ -24,7 +24,10 @@ final class LibraryWindowController: NSObject, NSWindowDelegate {
         window.toolbarStyle = .unified
         window.title = "Nab"
         window.titleVisibility = .hidden
-        // The titlebar draws no material of its own, so the backdrop runs unbroken from top to bottom.
+        // The window itself is clear: the glass ground inside it is what the desktop shows through.
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        // The titlebar draws no material of its own, so the ground runs unbroken from top to bottom.
         window.titlebarAppearsTransparent = true
         window.titlebarSeparatorStyle = .none
         window.isReleasedWhenClosed = false
@@ -297,44 +300,6 @@ final class LibraryModel {
     }
 }
 
-/// Behind-window translucency for the library window: the desktop shows faintly, blurred and tinted.
-private struct WindowBackdrop: View {
-    var body: some View {
-        ZStack {
-            BehindWindowBlur()
-            Palette.window.opacity(0.82)
-        }
-    }
-}
-
-private struct BehindWindowBlur: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let view = NSVisualEffectView()
-        view.material = .underWindowBackground
-        view.blendingMode = .behindWindow
-        view.state = .active
-        return view
-    }
-
-    func updateNSView(_ view: NSVisualEffectView, context: Context) {}
-}
-
-/// Content scrolled up under the toolbar fades out instead of running into its buttons. The system's scroll edge
-/// effect does not draw over this window's transparent titlebar, so the page masks itself.
-private struct ToolbarFade: View {
-    var body: some View {
-        GeometryReader { proxy in
-            let band = proxy.safeAreaInsets.top
-            VStack(spacing: 0) {
-                Color.clear.frame(height: max(band - 22, 0))
-                LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom).frame(height: 22)
-                Color.black
-            }
-            .ignoresSafeArea()
-        }
-    }
-}
-
 struct LibraryView: View {
     @Bindable var model: LibraryModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -342,8 +307,8 @@ struct LibraryView: View {
     var body: some View {
         ZStack {
             page
+                .padding(Space.s)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .mask { ToolbarFade() }
                 // Scoped, so opening a result from the palette does not animate the page it opens.
                 .animation(Motion.resolved(Motion.snap, reduceMotion: reduceMotion)) {
                     $0.blur(radius: model.searchQuery == nil ? 0 : 2)
@@ -353,7 +318,7 @@ struct LibraryView: View {
                     .transition(.opacity.animation(Motion.resolved(Motion.snap, reduceMotion: reduceMotion)))
             }
         }
-        .background { WindowBackdrop().ignoresSafeArea() }
+        .libraryGround()
         .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
         // The breadcrumb names the page; without this the window title "Nab" sits next to it on inner pages.
         .toolbar(removing: .title)
@@ -361,7 +326,7 @@ struct LibraryView: View {
         .background { hiddenShortcuts }
     }
 
-    /// One page at a time. The old page leaves at once and the new one fades in over the backdrop, so two
+    /// One page at a time. The old page leaves at once and the new one fades in over the ground, so two
     /// layouts never blend into each other.
     @ViewBuilder private var page: some View {
         switch model.route {
@@ -400,8 +365,10 @@ struct LibraryView: View {
         .sharedBackgroundVisibility(.hidden)
         ToolbarItem(placement: .principal) {
             SearchPill { model.searchQuery = "" }
+                .libraryCell()
                 .keyboardShortcut("k", modifiers: .command)
         }
+        .sharedBackgroundVisibility(.hidden)
         ToolbarItem(placement: .primaryAction) {
             NabButton("Nab a link", shortcut: "⇧⌘V", action: model.center.pasteLinks)
                 .keyboardShortcut("v", modifiers: [.command, .shift])
@@ -453,7 +420,8 @@ private struct Breadcrumb: View {
         }
         .padding(.horizontal, Space.s)
         // A fixed width keeps the search field and the buttons where they are on every page.
-        .frame(width: 300, alignment: .leading)
+        .frame(width: 300, height: 32, alignment: .leading)
+        .libraryCell()
         .accessibilityElement(children: .contain)
     }
 

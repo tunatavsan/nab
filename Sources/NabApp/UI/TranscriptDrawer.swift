@@ -35,8 +35,7 @@ struct TranscriptDrawer: View {
             footer(paragraphs)
         }
         .frame(width: Space.drawerWidth)
-        .background(Palette.sunken)
-        .overlay(alignment: .leading) { Rectangle().fill(Palette.line).frame(width: 1) }
+        .libraryCell(reading: true)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Transcript")
         .task(id: SearchInput(query: query, segments: capture?.transcript?.segments.count)) {

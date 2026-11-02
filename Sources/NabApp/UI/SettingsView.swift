@@ -27,6 +27,8 @@ struct SettingsView: View {
             .padding(.vertical, Space.xl)
             .frame(maxWidth: .infinity)
         }
+        // Every group is long text; the page is one reading cell and the groups are raised cards inside it.
+        .libraryCell(reading: true)
     }
 }
 

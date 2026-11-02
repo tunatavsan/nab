@@ -47,10 +47,9 @@ private struct VideoContent: View {
     private var chapters: [Chapter] { capture?.chapters ?? [] }
 
     var body: some View {
-        HStack(spacing: 0) {
-            aside.frame(width: 344)
-            Rectangle().fill(Palette.line).frame(width: 1)
-            transcriptSection
+        HStack(spacing: Space.s) {
+            aside.frame(width: 344).libraryCell()
+            transcriptSection.libraryCell(reading: true)
         }
         .task(id: entry.id) { await loadTokens() }
         // A window that opens focuses its first text field, which would light the find field whenever a video is
@@ -476,6 +475,7 @@ private struct VideoContent: View {
                 .padding(.vertical, Space.xl)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .scrollProbe("transcript.scroll")
             .onChange(of: scroll) { _, request in
                 guard let request else { return }
                 withAnimation(Motion.settle) { proxy.scrollTo(request.target, anchor: .center) }
