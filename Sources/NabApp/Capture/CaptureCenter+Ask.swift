@@ -1,3 +1,4 @@
+import Foundation
 import NabCore
 
 extension CaptureCenter {
@@ -10,8 +11,18 @@ extension CaptureCenter {
         switch await BrowserBridge.frontTab(accept: { registry.supports($0) }) {
         case .success(let tab):
             // A short link names its item only after one request.
-            guard let url = try? await registry.expand(tab.url), let match = registry.match(url) else {
-                show(.init(tone: .failed, title: "Nothing to nab", detail: "Nab couldn't open this short link."))
+            let url: URL
+            do {
+                url = try await registry.expand(tab.url)
+            } catch {
+                show(.init(tone: .failed, title: "Couldn't open this short link", detail: error.localizedDescription))
+                return nil
+            }
+            guard let match = registry.match(url) else {
+                show(
+                    .init(
+                        tone: .failed, title: "Couldn't open this short link",
+                        detail: "Nab doesn't read where it leads."))
                 return nil
             }
             add(url, title: Self.cleanTitle(tab.title))

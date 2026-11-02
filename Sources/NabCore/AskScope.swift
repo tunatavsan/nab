@@ -173,11 +173,40 @@ public enum AskScope: Sendable, Hashable {
         case refuse
     }
 
-    public static func sendPlan(readyCount: Int, reading: Bool, failure: String?) -> SendPlan {
-        if reading { return .hold }
+    /// `timedOut`: a held question has waited as long as it will; it goes with what is ready.
+    public static func sendPlan(readyCount: Int, reading: Bool, failure: String?, timedOut: Bool = false) -> SendPlan {
+        if reading && !timedOut { return .hold }
         if readyCount > 0 { return .send }
         if let failure, !failure.isEmpty { return .fail(failure) }
         return .refuse
+    }
+
+    /// How long a question waits for a record that is still being read.
+    public static let holdLimit: TimeInterval = 120
+
+    public static func holdExpired(since start: Date, now: Date) -> Bool {
+        now.timeIntervalSince(start) >= holdLimit
+    }
+
+    /// The one chat line for records that did not arrive in time.
+    public static func missingNote(titles: [String]) -> String {
+        let names = titles.map { "“\($0)”" }.joined(separator: ", ")
+        return "\(names) did not arrive in time, so this answer leaves \(titles.count == 1 ? "it" : "them") out."
+    }
+
+    /// The records an open session offers: those with a capture (even one whose later step failed) and those still
+    /// being read. A record with neither is out.
+    public static func sessionMembers(_ records: [(id: String, hasCapture: Bool, reading: Bool)]) -> [String] {
+        records.filter { $0.hasCapture || $0.reading }.map(\.id)
+    }
+
+    /// The records the window asks about. Once something was sent or held, `locked` keeps the window on that chat
+    /// whatever the session does; before that the scope follows the session live. Only the picker, or reopening
+    /// the window, changes it.
+    public static func windowIDs(
+        locked: [String]?, pinned: [String]?, scope: AskScope, session: [String], latest: String?
+    ) -> [String] {
+        locked ?? pinned ?? ids(for: scope, session: session, latest: latest)
     }
 
     /// What an empty chat shows. It follows the chat's own state; whether a summary may start by itself is a
