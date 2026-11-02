@@ -146,7 +146,7 @@ files in `~/Library/Application Support/Nab`; saved photos and clips are in the 
 | Shortcut | Does |
 | --- | --- |
 | ⌃⌥N | Nab the front browser tab. |
-| ⌃⌥A | Copy the session's context pack. |
+| ⌃⌥A | Copy the session: its photos and clips as files, or one context pack when a video is among them. |
 | ⌃⌥S | Open or close the ask window on the front tab's item. It sends nothing. |
 | ⌃⌥X | Start a fresh session. |
 | ⌘K | Search the library (in the library window). |
