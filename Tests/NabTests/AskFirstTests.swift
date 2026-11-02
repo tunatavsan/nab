@@ -88,3 +88,38 @@ import Testing
         #expect(AskScope.offersChoice(session: session, latest: "front"))
     }
 }
+
+@Suite struct AskStableChatTests {
+    @Test func aChatSentOnStaysOnItsRecordsWhenOneFails() {
+        // Sent on [f, a]; then f fails and leaves the live session.
+        let ids = AskScope.windowIDs(locked: ["f", "a"], pinned: nil, scope: .session, session: ["a"], latest: "a")
+        #expect(ids == ["f", "a"])
+    }
+
+    @Test func aNewRecordDoesNotMoveTheChatAfterASend() {
+        let locked = AskScope.windowIDs(
+            locked: ["a"], pinned: nil, scope: .session, session: ["n", "a"], latest: "n")
+        #expect(locked == ["a"])
+        // Before anything is sent the scope is live.
+        let live = AskScope.windowIDs(locked: nil, pinned: nil, scope: .session, session: ["n", "a"], latest: "n")
+        #expect(live == ["n", "a"])
+    }
+
+    @Test func aRecordWithACaptureStaysEvenIfItsLaterStepFailed() {
+        let members = AskScope.sessionMembers([
+            (id: "saved", hasCapture: true, reading: false),
+            (id: "reading", hasCapture: false, reading: true),
+            (id: "failed", hasCapture: false, reading: false),
+        ])
+        #expect(members == ["saved", "reading"])
+    }
+
+    @Test func aHeldQuestionGoesAfterTheLimitWithWhatIsReady() {
+        let start = Date(timeIntervalSince1970: 1000)
+        #expect(!AskScope.holdExpired(since: start, now: start.addingTimeInterval(119)))
+        #expect(AskScope.holdExpired(since: start, now: start.addingTimeInterval(120)))
+        #expect(AskScope.sendPlan(readyCount: 1, reading: true, failure: nil) == .hold)
+        #expect(AskScope.sendPlan(readyCount: 1, reading: true, failure: nil, timedOut: true) == .send)
+        #expect(AskScope.missingNote(titles: ["Lesson"]).contains("“Lesson” did not arrive"))
+    }
+}

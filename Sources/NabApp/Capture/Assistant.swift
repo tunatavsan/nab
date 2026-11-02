@@ -17,6 +17,8 @@ final class Assistant {
     /// finished or cleared chat instead of at 30 Hz; a chat view reads its live text through `conversation(_:)`.
     private var byID: [String: Conversation] = [:]
     @ObservationIgnored let previewCache = ChatPreviewCache()
+    /// The clock a held question measures its wait with; tests and previews may replace it.
+    @ObservationIgnored var clock: () -> Date = { .now }
     private(set) var streaming: Set<String> = []
     /// Questions typed while their record was still being read, by chat. They go out by themselves when the capture
     /// arrives, even if the window that took them is gone; kept in memory only.
@@ -183,14 +185,16 @@ final class Assistant {
     }
 
     @discardableResult
-    private func send(_ question: ChatMessage, to entryIDs: [String], opensSettings: Bool = true) -> Bool {
+    private func send(
+        _ question: ChatMessage, to entryIDs: [String], opensSettings: Bool = true, timedOut: Bool = false
+    ) -> Bool {
         let id = Conversation.id(for: entryIDs)
         guard !streaming.contains(id), waiting[id] == nil else { return false }
         let captures = entryIDs.compactMap { center.entry($0)?.capture }
         let reading = entryIDs.contains { center.entry($0)?.phase == .fetching }
         let plan = AskScope.sendPlan(
             readyCount: captures.count, reading: reading,
-            failure: entryIDs.compactMap { center.entry($0)?.failure }.first)
+            failure: entryIDs.compactMap { center.entry($0)?.failure }.first, timedOut: timedOut)
         switch plan {
         case .refuse: return false
         case .fail(let reason):
@@ -251,8 +255,8 @@ final class Assistant {
         let id = Conversation.id(for: entryIDs)
         waiting[id] = question
         tasks[id] = Task { [weak self] in
-            let deadline = ContinuousClock.now + .seconds(120)
-            while let self, !Task.isCancelled, ContinuousClock.now < deadline,
+            let start = self?.clock() ?? .now
+            while let self, !Task.isCancelled, !AskScope.holdExpired(since: start, now: self.clock()),
                 entryIDs.contains(where: { self.center.entry($0)?.phase == .fetching })
             {
                 try? await Task.sleep(for: .milliseconds(150))
@@ -269,8 +273,17 @@ final class Assistant {
         let failure = entryIDs.compactMap { center.entry($0)?.failure }.first
         switch AskScope.resolveHeld(readyCount: ready.count, failure: failure) {
         case .send:
+            // A fetch still stuck after the limit does not hold the question back: it goes with what is ready, and
+            // one chat line says what is missing.
+            let missing = entryIDs.filter { center.entry($0)?.phase == .fetching }.map { center.entry($0)?.title ?? $0 }
+            if !missing.isEmpty {
+                var conversation = byID[id] ?? Conversation(entryIDs: entryIDs)
+                conversation.messages.append(
+                    ChatMessage(role: .assistant, text: AskScope.missingNote(titles: missing), failed: true))
+                byID[id] = conversation
+            }
             // Nothing opens in the background: a provider that cannot answer is one line in the chat.
-            if !send(question, to: entryIDs, opensSettings: false) {
+            if !send(question, to: entryIDs, opensSettings: false, timedOut: true) {
                 showFailure(question, for: entryIDs, client.problem ?? "The question could not be sent.")
             }
         case .fail(let reason):

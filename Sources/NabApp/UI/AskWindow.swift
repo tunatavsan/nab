@@ -7,7 +7,9 @@ import SwiftUI
 /// What the floating window is asking about, what the user typed, and the hooks its controller fills in.
 @MainActor @Observable
 final class AskModel {
-    var scope = AskScope.session
+    var scope = AskScope.session {
+        didSet { locked = nil }
+    }
     /// The open session's records, read live: still-fetching ones and the front tab's record are in it, and it
     /// follows the session as captures land. Reading it in a view body tracks the session.
     @ObservationIgnored var session: () -> [String] = { [] }
@@ -17,6 +19,8 @@ final class AskModel {
     var focusID: String?
     /// Records handed in by a caller that are neither the session nor the latest one.
     var pinned: [String]?
+    /// The records of the chat a question was sent or held in; the window stays on it until the picker or a reopen.
+    var locked: [String]?
     var draft = ""
     /// Set when the window came from a link or with a draft: no summary goes out until the user asks for one.
     var holdsSummary = false
@@ -34,7 +38,9 @@ final class AskModel {
     @ObservationIgnored var setHeight: (CGFloat) -> Void = { _ in }
 
     var latest: String? { focusID ?? latestID }
-    var ids: [String] { pinned ?? AskScope.ids(for: scope, session: sessionIDs, latest: latest) }
+    var ids: [String] {
+        AskScope.windowIDs(locked: locked, pinned: pinned, scope: scope, session: sessionIDs, latest: latest)
+    }
     var showsPicker: Bool { pinned == nil && AskScope.offersChoice(session: sessionIDs, latest: latest) }
 }
 
@@ -85,7 +91,10 @@ final class AskWindowController {
         }
         model.summarize = { [weak self] in _ = self?.summarizeNow() }
         model.sent = { [weak self] scope, pinned, count in self?.markUsed(scope: scope, pinned: pinned, count: count) }
-        model.session = { center.session.filter { $0.phase != .failed }.map(\.id) }
+        model.session = {
+            AskScope.sessionMembers(
+                center.session.map { (id: $0.id, hasCapture: $0.capture != nil, reading: $0.phase == .fetching) })
+        }
         model.setHeight = { [weak self] in self?.panel.setHeight($0) }
     }
 
@@ -95,6 +104,7 @@ final class AskWindowController {
     /// is the record the shortcut nabbed from the front tab: the scope starts on it whatever the session holds.
     func show(ids: [String]? = nil, focus: String? = nil, draft: String? = nil, holdsSummary: Bool = false) {
         refresh()
+        model.locked = nil
         model.focusID = focus
         if focus != nil {
             model.scope = AskScope.initial(sessionIDs: model.sessionIDs, focus: focus)
@@ -186,6 +196,7 @@ final class AskWindowController {
                 model.choosing = true
             } else {
                 if assistant.summarize(ids) {
+                    model.locked = ids
                     markUsed(scope: scope, pinned: pinned, count: ids.count)
                 } else {
                     // Nothing went out: the Summarize view comes back instead of a wait that never ends.
@@ -477,6 +488,7 @@ struct AskView: View {
         let (scope, pinned) = (model.scope, model.pinned != nil)
         if assistant.ask(model.draft, about: ids) {
             model.draft = ""
+            model.locked = ids
             model.sent(scope, pinned, ids.count)
         }
     }
