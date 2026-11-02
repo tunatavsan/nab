@@ -37,8 +37,11 @@ enum Palette {
     static let pressed = dynamic(dark: 0xFFFFFF, light: 0x14181E, darkAlpha: 0.09, lightAlpha: 0.10)
 
     static let ink = dynamic(dark: 0xE8EAED, light: 0x14161A)
-    static let inkSecondary = dynamic(dark: 0xA8AEB6, light: 0x454B53)
-    static let inkTertiary = dynamic(dark: 0x7F868F, light: 0x6B727B)
+    /// Secondary and tertiary ink sit on glass, so they are set for the brightest desktop that can show through it,
+    /// not for an opaque surface: on a white desktop the dark glass behind a card measured as light as #414141, and
+    /// tertiary text needs 4.5:1 there. Secondary stays a step above tertiary.
+    static let inkSecondary = dynamic(dark: 0xC0C6CE, light: 0x454B53)
+    static let inkTertiary = dynamic(dark: 0xABB2BB, light: 0x5C636C)
 
     /// The 1 pt rim around the outer ring.
     static let rim = Color.white.opacity(0.16)
