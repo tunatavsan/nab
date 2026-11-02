@@ -35,6 +35,14 @@ enum BrowserBridge {
     /// browser whose active tab `accept`s.
     @MainActor
     static func frontTab(accept: @escaping @Sendable (URL) -> Bool) async -> Result<FrontTab, NabBridgeError> {
+        #if DEBUG
+            // Debug builds only: `NAB_FRONT_TAB=<url>` or `none` answers without asking any browser, so scripted
+            // runs never trigger an Automation prompt.
+            if let fake = ProcessInfo.processInfo.environment["NAB_FRONT_TAB"] {
+                guard fake != "none", let url = URL(string: fake) else { return .failure(.noBrowser) }
+                return accept(url) ? .success(FrontTab(url: url, title: nil)) : .failure(.noLink)
+            }
+        #endif
         let running = NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier)
         let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
         let candidates: [(id: String, family: Family)]

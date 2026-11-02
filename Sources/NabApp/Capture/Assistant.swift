@@ -18,6 +18,9 @@ final class Assistant {
     private var byID: [String: Conversation] = [:]
     @ObservationIgnored let previewCache = ChatPreviewCache()
     private(set) var streaming: Set<String> = []
+    /// Questions typed while their record was still being read, by chat. They go out by themselves when the capture
+    /// arrives, even if the window that took them is gone; kept in memory only.
+    private(set) var waiting: [String: ChatMessage] = [:]
     /// Opens the settings page of the library window; set by the app delegate.
     @ObservationIgnored var openSettings: () -> Void = {}
 
@@ -80,6 +83,12 @@ final class Assistant {
 
     func conversation(_ entryIDs: [String]) -> Conversation? { byID[Conversation.id(for: entryIDs)] }
     func isStreaming(_ entryIDs: [String]) -> Bool { streaming.contains(Conversation.id(for: entryIDs)) }
+    func isWaiting(_ entryIDs: [String]) -> Bool { waiting[Conversation.id(for: entryIDs)] != nil }
+
+    /// "Waiting for the transcript…", or "…the details" for a photo or clip.
+    func waitingLabel(_ entryIDs: [String]) -> String {
+        AskScope.waitingLabel(isMedia: entryIDs.contains { center.isMedia($0) })
+    }
 
     /// Loads a saved chat the first time its videos are shown.
     func load(_ entryIDs: [String]) async {
@@ -96,7 +105,8 @@ final class Assistant {
 
     /// Starts the summary question. A provider that cannot answer is the caller's to handle (see
     /// `needsProviderChoice`); nothing opens here.
-    func summarize(_ entryIDs: [String]) {
+    @discardableResult
+    func summarize(_ entryIDs: [String]) -> Bool {
         send(
             ChatMessage(role: .user, text: settings.resolvedSummaryPrompt, isSummaryRequest: true), to: entryIDs,
             opensSettings: false)
@@ -139,6 +149,7 @@ final class Assistant {
             tasks[id]?.cancel()
             tasks[id] = nil
             streaming.remove(id)
+            waiting[id] = nil
             byID[id] = nil
         }
         reindex()
@@ -174,13 +185,18 @@ final class Assistant {
     @discardableResult
     private func send(_ question: ChatMessage, to entryIDs: [String], opensSettings: Bool = true) -> Bool {
         let id = Conversation.id(for: entryIDs)
-        guard !streaming.contains(id) else { return false }
+        guard !streaming.contains(id), waiting[id] == nil else { return false }
         let captures = entryIDs.compactMap { center.entry($0)?.capture }
-        guard !captures.isEmpty else { return false }
+        let reading = entryIDs.contains { center.entry($0)?.phase == .fetching }
+        guard !captures.isEmpty || reading else { return false }
         let client = client
         if client.problem != nil {
             if opensSettings { openSettings() }
             return false
+        }
+        guard !captures.isEmpty else {
+            hold(question, for: entryIDs)
+            return true
         }
 
         var conversation = byID[id] ?? Conversation(entryIDs: entryIDs)
@@ -218,6 +234,50 @@ final class Assistant {
                 summaryOf: question.isSummaryRequest && entryIDs.count == 1 ? entryIDs[0] : nil)
         }
         return true
+    }
+
+    /// Keeps a question until its record has been read, then sends it; a failed read puts the reason in the chat.
+    private func hold(_ question: ChatMessage, for entryIDs: [String]) {
+        let id = Conversation.id(for: entryIDs)
+        waiting[id] = question
+        tasks[id] = Task { [weak self] in
+            let deadline = ContinuousClock.now + .seconds(120)
+            while let self, !Task.isCancelled, ContinuousClock.now < deadline,
+                entryIDs.contains(where: { self.center.entry($0)?.phase == .fetching })
+            {
+                try? await Task.sleep(for: .milliseconds(150))
+            }
+            self?.release(id, question, entryIDs, cancelled: Task.isCancelled)
+        }
+    }
+
+    private func release(_ id: String, _ question: ChatMessage, _ entryIDs: [String], cancelled: Bool) {
+        waiting[id] = nil
+        tasks[id] = nil
+        guard !cancelled else { return }
+        let ready = entryIDs.filter { center.entry($0)?.capture != nil }
+        let failure = entryIDs.compactMap { center.entry($0)?.failure }.first
+        switch AskScope.resolveHeld(
+            readyCount: ready.count, failure: failure, isMedia: entryIDs.contains { center.isMedia($0) })
+        {
+        case .send:
+            send(question, to: entryIDs)
+        case .fail(let reason):
+            var conversation = byID[id] ?? Conversation(entryIDs: entryIDs)
+            conversation.messages.append(question)
+            conversation.messages.append(ChatMessage(role: .assistant, text: reason, failed: true))
+            conversation.updatedAt = .now
+            byID[id] = conversation
+            reindex()
+            let store = center.store
+            Task { [center] in
+                do {
+                    try await store.save(conversation)
+                } catch {
+                    center.report(error, while: "saving the chat")
+                }
+            }
+        }
     }
 
     private func update(_ id: String, _ messageID: UUID, _ change: (inout ChatMessage) -> Void) {

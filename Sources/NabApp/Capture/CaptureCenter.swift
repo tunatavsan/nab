@@ -315,15 +315,19 @@ final class CaptureCenter {
         }
     }
 
-    /// The entries a summary should cover: the session's ready captures, or else the latest one.
+    /// The entries a summary should cover: the session's ready captures, or else the latest one. Reading them uses
+    /// nothing up; the session counts as used when something is sent about it (`consumeSession`) or copied.
     func sessionSummaryIDs() -> [String] {
         var ids = session.filter { $0.capture != nil }.map(\.id)
         if ids.isEmpty, let latest = entries.first(where: { $0.capture != nil }) { ids = [latest.id] }
-        if !ids.isEmpty {
-            sessionConsumed = true
-            persistSession()
-        }
         return ids
+    }
+
+    /// Something was sent about the whole session: the next nab starts a new one.
+    func consumeSession() {
+        guard !session.isEmpty else { return }
+        sessionConsumed = true
+        persistSession()
     }
 
     private static func thousands(_ tokens: Int) -> String {
@@ -597,7 +601,7 @@ final class CaptureCenter {
 
     // MARK: Toast
 
-    private func show(_ next: Toast, hold: Bool = false) {
+    func show(_ next: Toast, hold: Bool = false) {
         var next = next
         next.pulse = (toast?.pulse ?? 0) + 1
         toast = next

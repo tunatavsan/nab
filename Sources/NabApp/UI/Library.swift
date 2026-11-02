@@ -214,8 +214,15 @@ final class LibraryModel {
         return center.entries.first { $0.capture != nil }.map { [$0.id] } ?? []
     }
 
-    /// Opens a chat about `ids` and summarizes it unless that chat already started.
+    /// Opens the chat about `ids` and waits for a question or a press on Summarize.
     func ask(about ids: [String]) {
+        guard !ids.isEmpty else { return }
+        searchQuery = nil
+        go(.session(ids))
+    }
+
+    /// The "Summarize" buttons: opens the chat and summarizes it unless that chat already started.
+    func summarize(about ids: [String]) {
         guard !ids.isEmpty else { return }
         searchQuery = nil
         go(.session(ids))
@@ -239,10 +246,12 @@ final class LibraryModel {
     /// Opens a chat about the current video (or the open session from the home page) and summarizes it
     /// unless that chat already started.
     func summarize() {
-        let ids = currentIDs.isEmpty ? center.sessionSummaryIDs() : currentIDs
+        let fromSession = currentIDs.isEmpty
+        let ids = fromSession ? center.sessionSummaryIDs() : currentIDs
         guard !ids.isEmpty else { return }
         go(.session(ids))
         Task { await assistant.summarizeIfNew(ids) }
+        if fromSession { center.consumeSession() }
     }
 
     /// ⌘J: ask AI about the current page.

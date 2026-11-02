@@ -13,6 +13,8 @@ final class StatusController {
         let openLibrary: (String?) -> Void
         /// Opens the library's chat on these entries and summarizes them.
         let summarize: ([String]) -> Void
+        /// The Ask AI button: opens the question window on these entries and waits for a question.
+        let ask: ([String]) -> Void
         let openSettings: () -> Void
         let copyAll: () -> Void
         let newSession: () -> Void
@@ -64,6 +66,10 @@ final class StatusController {
                     summarize: { [weak self] ids in
                         self?.close()
                         actions.summarize(ids)
+                    },
+                    ask: { [weak self] ids in
+                        self?.close()
+                        actions.ask(ids)
                     },
                     openSettings: { [weak self] in
                         self?.close()
@@ -396,7 +402,7 @@ private struct MenuPanelView: View {
             ActionTile(
                 label: "Ask AI", combo: key(.summarize), primary: true, enabled: ready
             ) {
-                actions.summarize(center.sessionSummaryIDs())
+                actions.ask(center.sessionSummaryIDs())
             }
             ActionTile(
                 label: "New session", combo: key(.newSession), enabled: !tray.isEmpty, action: actions.newSession)

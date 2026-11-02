@@ -93,7 +93,7 @@ struct HomePage: View {
                     .help("Copy the session's videos as one context pack")
                 NabButton("Ask AI", combo: shortcuts.combo(for: .summarize), kind: .primary) { model.ask(about: ready) }
                     .disabled(ready.isEmpty)
-                    .help("Chat about the session and summarize it")
+                    .help("Ask about the session")
             }
             grid([cells(of: session)], sessions: nil, columns: Self.openColumns, large: true)
         }
@@ -394,7 +394,7 @@ private struct SessionLabel: View {
         .contextMenu {
             Button("Open Chat") { model.go(.session(session.allEntryIDs)) }
             Button("Copy Context") { model.copyContext(of: ready) }.disabled(ready.isEmpty)
-            Button("Summarize") { model.ask(about: ready) }.disabled(ready.isEmpty)
+            Button("Summarize") { model.summarize(about: ready) }.disabled(ready.isEmpty)
         }
     }
 }
