@@ -107,15 +107,15 @@ struct PinDescriptionTests {
 
     @Test func aDragCarriesWhatCopyCarriesAndStopsWhenAFileIsGone() {
         let photo = pin("p", title: "Photo", summary: nil, saved: ["one.png", "two.png"])
-        #expect(DragPayload.resolve(photo, exists: { _ in true }) == CopyPayload.single(photo))
-        guard case .files(let files)? = DragPayload.resolve(photo, exists: { _ in true }) else {
+        #expect(DragPayload.resolve(photo, size: { _ in 1 }) == CopyPayload.single(photo))
+        guard case .files(let files)? = DragPayload.resolve(photo, size: { _ in 1 }) else {
             Issue.record("expected files")
             return
         }
         #expect(files.count == 2)
-        #expect(DragPayload.resolve(photo, exists: { $0.hasSuffix("one.png") }) == nil)
+        #expect(DragPayload.resolve(photo, size: { $0.hasSuffix("one.png") ? 1 : nil }) == nil)
         let text = pin("t", title: "Text", summary: nil)
-        guard case .text? = DragPayload.resolve(text, exists: { _ in false }) else {
+        guard case .text? = DragPayload.resolve(text, size: { _ in nil }) else {
             Issue.record("expected text")
             return
         }

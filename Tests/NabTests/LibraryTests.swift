@@ -142,7 +142,7 @@ struct LibraryTests {
         await withTaskGroup(of: Void.self) { group in
             for _ in 0..<8 {
                 group.addTask {
-                    await gate.run {
+                    try? await gate.run {
                         await load.enter()
                         try? await Task.sleep(for: .milliseconds(20))
                         await load.leave()
@@ -152,5 +152,18 @@ struct LibraryTests {
         }
         #expect(await load.peak == 2)
         #expect(await load.now == 0)
+    }
+
+    /// A removed item's fetch stops waiting for a slot at once instead of holding up the ones behind it.
+    @Test(.timeLimit(.minutes(1))) func aCancelledWaiterLeavesTheLineAtOnce() async throws {
+        let gate = Gate(limit: 1)
+        let holder = Task { try await gate.run { try? await Task.sleep(for: .milliseconds(400)) } }
+        try await Task.sleep(for: .milliseconds(50))
+        let waiter = Task { try await gate.run { "ran" } }
+        try await Task.sleep(for: .milliseconds(50))
+        waiter.cancel()
+        await #expect(throws: CancellationError.self) { try await waiter.value }
+        try await holder.value
+        #expect(try await gate.run { "next" } == "next")
     }
 }

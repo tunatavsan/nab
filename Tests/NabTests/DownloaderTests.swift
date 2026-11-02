@@ -108,4 +108,28 @@ struct DownloaderTests {
         #expect(leftovers().isEmpty)
         #expect(!FileManager.default.fileExists(atPath: MediaDownloader.partialFile(for: file).path))
     }
+
+    /// Stopped while the arrived file sits as `.partial` next to its target: the `.partial` goes, and the target
+    /// name never holds it.
+    @Test(.timeLimit(.minutes(1))) func cancellingBeforeTheRenameRemovesThePartialFile() async throws {
+        MediaStub.set("/late.png", [.init(status: 200, body: Data(repeating: 7, count: 64))])
+        let file = folder.appending(path: "late.png")
+        let partial = MediaDownloader.partialFile(for: file)
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [MediaStub.self]
+        let loader = MediaDownloader(
+            session: URLSession(configuration: config), limit: 2, attempts: 1, backoff: .milliseconds(1),
+            beforeRename: { try? await Task.sleep(for: .seconds(30)) })
+        let task = Task { try await loader.download(URL(string: "https://media.example/late.png")!, to: file) }
+        var waited = 0
+        while !FileManager.default.fileExists(atPath: partial.path), waited < 300 {
+            try await Task.sleep(for: .milliseconds(10))
+            waited += 1
+        }
+        #expect(FileManager.default.fileExists(atPath: partial.path))
+        task.cancel()
+        await #expect(throws: (any Error).self) { _ = try await task.value }
+        #expect(!FileManager.default.fileExists(atPath: partial.path))
+        #expect(!FileManager.default.fileExists(atPath: file.path))
+    }
 }

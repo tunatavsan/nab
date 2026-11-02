@@ -6,9 +6,9 @@ public enum DragPayload {
     /// nothing (the item shows "File moved or deleted" instead).
     public static func resolve(
         _ capture: Capture, capturedAt: Date = .now,
-        exists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
+        size: (String) -> Int64? = { MediaProbe.fileSize(atPath: $0) }
     ) -> CopyPayload? {
-        guard CopyPayload.missing([capture], exists: exists).isEmpty else { return nil }
+        guard CopyPayload.missing([capture], size: size).isEmpty else { return nil }
         return CopyPayload.single(capture, capturedAt: capturedAt)
     }
 }

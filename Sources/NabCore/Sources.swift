@@ -110,19 +110,42 @@ public struct NabError: LocalizedError, Sendable {
 public actor Gate {
     private let limit: Int
     private var running = 0
-    private var waiting: [CheckedContinuation<Void, Never>] = []
+    /// Tasks waiting for a slot, first come first served; each is told whether it got one (false: it was cancelled).
+    private var waiting: [(id: UUID, slot: CheckedContinuation<Bool, Never>)] = []
 
     public init(limit: Int) { self.limit = limit }
 
-    public func run<T: Sendable>(_ work: @Sendable () async throws -> T) async rethrows -> T {
-        if running >= limit {
-            await withCheckedContinuation { waiting.append($0) }
-        } else {
-            running += 1
-        }
-        defer {
-            if waiting.isEmpty { running -= 1 } else { waiting.removeFirst().resume() }
-        }
+    /// Runs `work` once a slot is free. A task cancelled while it waits leaves the line at once and throws
+    /// `CancellationError`, so a removed item never holds up the ones behind it.
+    public func run<T: Sendable>(_ work: @Sendable () async throws -> T) async throws -> T {
+        try await enter()
+        defer { leave() }
         return try await work()
+    }
+
+    private func enter() async throws {
+        guard running >= limit else {
+            running += 1
+            return
+        }
+        let id = UUID()
+        let admitted = await withTaskCancellationHandler {
+            await withCheckedContinuation { slot in
+                if Task.isCancelled { slot.resume(returning: false) } else { waiting.append((id, slot)) }
+            }
+        } onCancel: {
+            Task { await self.cancel(id) }
+        }
+        guard admitted else { throw CancellationError() }
+    }
+
+    private func cancel(_ id: UUID) {
+        guard let index = waiting.firstIndex(where: { $0.id == id }) else { return }
+        waiting.remove(at: index).slot.resume(returning: false)
+    }
+
+    /// Hands the slot to the next in line, or frees it.
+    private func leave() {
+        if waiting.isEmpty { running -= 1 } else { waiting.removeFirst().slot.resume(returning: true) }
     }
 }
