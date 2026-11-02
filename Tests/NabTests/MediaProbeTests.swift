@@ -158,12 +158,17 @@ struct MediaProbeTests {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         for name in [
             "A (Pinterest 1).png.partial", "B (YouTube x) 2.mp4.partial", "notes.partial", "C (Pinterest 2).png",
-            "D (Elsewhere 3).png.partial",
+            "D (Elsewhere 3).png.partial", "my (Pinterest notes) backup.zip.partial", "(Pinterest 7) draft.partial",
+            "(Pinterest 8).jpg.partial", "E (Pinterest 4) 2 (3).mp4.partial", "F (Pinterest 5) (two).png.partial",
         ] {
             FileManager.default.createFile(atPath: folder.appending(path: name).path, contents: Data("x".utf8))
         }
         let found = MediaFolder.leftovers(in: folder, sourceNames: ["YouTube", "Pinterest"])
-        #expect(found.map(\.lastPathComponent) == ["A (Pinterest 1).png.partial", "B (YouTube x) 2.mp4.partial"])
+        #expect(
+            found.map(\.lastPathComponent) == [
+                "(Pinterest 8).jpg.partial", "A (Pinterest 1).png.partial", "B (YouTube x) 2.mp4.partial",
+                "E (Pinterest 4) 2 (3).mp4.partial",
+            ])
     }
 
     @Test func aLonePhotoAlsoGoesAsAPicture() {

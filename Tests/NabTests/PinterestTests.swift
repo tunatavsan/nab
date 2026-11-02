@@ -703,6 +703,79 @@ extension PinterestTests {
     }
 }
 
+extension PinterestTests {
+    @Test func aClipEveryCopyOfWhichIsRefusedIsDroppedAndTheRestIsSavedWithANote() async throws {
+        let refusedClip = Fake.hash(111)
+        let (source, _) = Fake.source { request in
+            if request.httpMethod == "HEAD" {
+                return request.url?.path().contains(refusedClip) == true
+                    ? .init(status: 403) : .init(status: 200, headers: ["Content-Length": "500"])
+            }
+            guard Fake.isAPI(request) else { return nil }
+            let pages = (110..<113).map { n in
+                ["blocks": [["type": "story_pin_video_block", "video": Fake.ideaClip(n)]]]
+            }
+            return Fake.api(["id": "111222333", "title": "Invented idea", "story_pin_data": ["pages": pages]])
+        }
+        let capture = try await source.fetch(Fake.pin)
+        #expect(capture.media.map(\.url.absoluteString) == [Fake.clip("720p", 110), Fake.clip("720p", 112)])
+        #expect(capture.note == "1 of 3 clips can't be saved")
+
+        let (none, _) = Fake.source { request in
+            if request.httpMethod == "HEAD" { return .init(status: 403) }
+            guard Fake.isAPI(request) else { return nil }
+            return Fake.api(["id": "111222333", "videos": ["video_list": Fake.ideaClip(113)["video_list"]!]])
+        }
+        await #expect(throws: PinterestSource.ClipRefused.self) { try await none.fetch(Fake.pin) }
+    }
+
+    @Test func theListOfOtherCopiesForgetsTheOldestPastItsBound() {
+        let list = Alternates(limit: 3)
+        let clips = (0..<5).map { URL(string: Fake.clip("720p", 120 + $0))! }
+        for clip in clips { list.remember([clip], after: clip) }
+        #expect(list.count == 3)
+        #expect(list.after(clips[0]).isEmpty && list.after(clips[1]).isEmpty)
+        #expect(list.after(clips[4]) == [clips[4]])
+    }
+
+    @Test func aSaveWithoutAListReadsThePinOnceForFreshCopies() async throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: "nab-pin-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let (source, router) = Fake.source { request in
+            if Fake.isAPI(request) {
+                return Fake.api(["id": "111222333", "videos": ["video_list": Fake.ideaClip(130)["video_list"]!]])
+            }
+            return request.url?.path().contains("/720p/") == true
+                ? .init(status: 403) : .init(status: 200, body: Data(repeating: 4, count: 55))
+        }
+        // As after a restart: the media is known, the source never saw its other copies.
+        let media = Media(kind: .video, url: URL(string: Fake.clip("720p", 130))!)
+        let capture = Capture(source: .pinterest, sourceID: "111222333", url: Fake.pin, title: "t", media: [media])
+        let file = folder.appending(path: "c.mp4")
+        try await source.save(media, of: capture, to: file, progress: { _, _ in })
+        #expect(try Data(contentsOf: file).count == 55)
+        #expect(router.count("GET") == 3, "the refused copy, one read of the pin, the first fresh copy")
+        #expect(router.requests.filter { $0.contains("PinResource") }.count == 1)
+    }
+
+    @Test func aSaveWhoseFreshCopiesAreRefusedTooSaysSoAndReadsThePinOnlyOnce() async throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: "nab-pin-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let (source, router) = Fake.source { request in
+            if Fake.isAPI(request) {
+                return Fake.api(["id": "111222333", "videos": ["video_list": Fake.ideaClip(131)["video_list"]!]])
+            }
+            return .init(status: 403)
+        }
+        let media = Media(kind: .video, url: URL(string: Fake.clip("720p", 131))!)
+        let capture = Capture(source: .pinterest, sourceID: "111222333", url: Fake.pin, title: "t", media: [media])
+        await #expect(throws: PinterestSource.ClipRefused.self) {
+            try await source.save(media, of: capture, to: folder.appending(path: "c.mp4"), progress: { _, _ in })
+        }
+        #expect(router.requests.filter { $0.contains("PinResource") }.count == 1)
+    }
+}
+
 /// Answers "busy" exactly once.
 private final class BusyOnce: @unchecked Sendable {
     private let lock = NSLock()

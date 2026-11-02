@@ -146,4 +146,25 @@ struct DownloaderTests {
         #expect(!FileManager.default.fileExists(atPath: partial.path))
         #expect(!FileManager.default.fileExists(atPath: file.path))
     }
+
+    @Test func aVolumeWithoutExclusiveRenameStillRefusesATakenNameAtomically() throws {
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let partial = folder.appending(path: "a.png.partial")
+        let taken = folder.appending(path: "a.png")
+        try Data("new".utf8).write(to: partial)
+        try Data("mine".utf8).write(to: taken)
+        let unsupported: (String, String) -> Int32 = { _, _ in
+            errno = ENOTSUP
+            return -1
+        }
+        #expect(throws: CocoaError.self) {
+            try MediaDownloader.claim(taken, from: partial, exclusiveRename: unsupported)
+        }
+        #expect(try String(contentsOf: taken, encoding: .utf8) == "mine")
+
+        let free = folder.appending(path: "b.png")
+        try MediaDownloader.claim(free, from: partial, exclusiveRename: unsupported)
+        #expect(try String(contentsOf: free, encoding: .utf8) == "new")
+        #expect(!FileManager.default.fileExists(atPath: partial.path))
+    }
 }

@@ -17,7 +17,7 @@ public struct PinterestSource: SourceProvider {
     private let downloader: MediaDownloader
     private let backoff: Duration
     private let gate = Gate(limit: 8)
-    private let alternates = Alternates()
+    private let alternates = Alternates(limit: 256)
 
     static let userAgent =
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
@@ -82,12 +82,13 @@ public struct PinterestSource: SourceProvider {
         if let image = PinterestURL.image(in: url) { return try await capture(of: image, from: url) }
         guard let id = PinterestURL.pinID(in: url) else { throw NabError("Not a Pinterest pin link.") }
         let pin = try await load(id)
-        let media = try await resolve(pin.slots)
+        let (media, refused) = try await resolve(pin.slots)
         let durations = media.compactMap(\.duration)
         return Capture(
             source: .pinterest, sourceID: id, url: PinterestURL.pinURL(id), title: pin.title, author: pin.author,
             authorURL: pin.authorURL, duration: durations.isEmpty ? nil : durations.reduce(0, +),
-            summary: pin.summary, thumbnailURL: pin.thumbnail, media: media, note: pin.note)
+            summary: pin.summary, thumbnailURL: pin.thumbnail, media: media,
+            note: PinterestPin.note(lost: pin.streams + refused, of: pin.clips))
     }
 
     /// A link straight to a photo has no pin around it: just the photo, at the largest copy Pinterest will give,
@@ -153,8 +154,10 @@ public struct PinterestSource: SourceProvider {
     }
 
     /// Picks the best copy of each clip (the largest file, asked of the server with a HEAD) and keeps the order.
-    private func resolve(_ slots: [PinterestPin.Slot]) async throws -> [Media] {
-        try await withThrowingTaskGroup(of: (Int, Media).self) { group in
+    /// Every slot as media, in order, and how many clips were dropped because the server refuses every copy of them
+    /// (the rest of the pin is still saved).
+    private func resolve(_ slots: [PinterestPin.Slot]) async throws -> (media: [Media], refused: Int) {
+        let found = try await withThrowingTaskGroup(of: (Int, Media?).self) { group in
             for (index, slot) in slots.enumerated() {
                 group.addTask {
                     switch slot {
@@ -166,7 +169,8 @@ public struct PinterestSource: SourceProvider {
                         found.url = copy
                         return (index, found)
                     case .video(let variants):
-                        let best = try await self.best(of: variants)
+                        let best: PinterestPin.Variant
+                        do { best = try await self.best(of: variants) } catch is ClipRefused { return (index, nil) }
                         return (
                             index,
                             Media(
@@ -176,10 +180,18 @@ public struct PinterestSource: SourceProvider {
                     }
                 }
             }
-            var found: [(Int, Media)] = []
+            var found: [(Int, Media?)] = []
             for try await item in group { found.append(item) }
             return found.sorted { $0.0 < $1.0 }.map(\.1)
         }
+        let media = found.compactMap { $0 }
+        if media.isEmpty, !slots.isEmpty { throw ClipRefused() }
+        return (media, found.count - media.count)
+    }
+
+    /// Every copy of a clip was refused by the server.
+    struct ClipRefused: LocalizedError {
+        var errorDescription: String? { "Pinterest refused every copy of this clip." }
     }
 
     /// The copy to save. The others are remembered, best first, for `save` to fall back on if Pinterest refuses
@@ -204,7 +216,7 @@ public struct PinterestSource: SourceProvider {
             }
         }
         let order = PinterestPin.ordered(variants, sizes: sizes, refused: refused)
-        guard let first = order.first else { throw NabError("Pinterest refused every copy of this clip.") }
+        guard let first = order.first else { throw ClipRefused() }
         alternates.remember(order.dropFirst().map(\.url), after: first.url)
         return first
     }
@@ -241,25 +253,45 @@ public struct PinterestSource: SourceProvider {
             urls += ["1200x", "736x"].compactMap { PinterestURL.imageURL(size: $0, hash: image.hash, ext: "jpg") }
         }
         let headers = ["User-Agent": Self.userAgent]
-        for (index, url) in urls.enumerated() {
+        var reread = false
+        var index = 0
+        while index < urls.count {
+            let url = urls[index]
+            index += 1
             do {
                 // The downloader has its own queue; holding the details gate here would stall every new pin behind
                 // the slowest download.
                 try await downloader.download(url, to: file, headers: headers, progress: progress)
                 return
-            } catch let error as HTTPStatusError where Self.isRefusal(error.status) && index < urls.count - 1 {
-                continue
+            } catch let error as HTTPStatusError where Self.isRefusal(error.status) {
+                // Out of copies for a clip (or there never was a list, after a restart): read the pin once more for
+                // fresh addresses. Once only, so trying again can never loop on the same refusal.
+                if index == urls.count, media.kind == .video, !reread {
+                    reread = true
+                    urls += await freshCopies(of: media, in: capture, except: urls)
+                }
+                if index == urls.count {
+                    if media.kind == .video { throw ClipRefused() }
+                    throw error
+                }
             }
         }
         throw HTTPStatusError(status: 403)
     }
 
-    /// The other copies of each clip, remembered from the fetch to the save.
-    private final class Alternates: @unchecked Sendable {
-        private let lock = NSLock()
-        private var later: [URL: [URL]] = [:]
-        func remember(_ urls: [URL], after url: URL) { lock.withLock { later[url] = urls } }
-        func after(_ url: URL) -> [URL] { lock.withLock { later[url] ?? [] } }
+    /// The addresses the pin lists now for the clip `media` is, best name first, leaving out ones already tried.
+    private func freshCopies(of media: Media, in capture: Capture, except tried: [URL]) async -> [URL] {
+        guard let id = PinterestURL.pinID(in: capture.url), let pin = try? await load(id) else { return [] }
+        let key = Self.clipKey(media.url)
+        for case .video(let variants) in pin.slots where variants.contains(where: { Self.clipKey($0.url) == key }) {
+            return PinterestPin.ordered(variants, sizes: [:]).map(\.url).filter { !tried.contains($0) }
+        }
+        return []
+    }
+
+    /// What the copies of one clip share: `…/<hash>.mp4` and `…/<hash>_t4.mp4` are the same clip.
+    static func clipKey(_ url: URL) -> String {
+        url.deletingPathExtension().lastPathComponent.split(separator: "_").first.map(String.init) ?? ""
     }
 
     // MARK: Requests
@@ -295,4 +327,25 @@ private final class StopRedirects: NSObject, URLSessionTaskDelegate {
     ) {
         completionHandler(nil)
     }
+}
+
+/// The other copies of each clip, remembered from the fetch to the save. It holds the last `limit` clips; the
+/// oldest is forgotten first.
+final class Alternates: @unchecked Sendable {
+    private let lock = NSLock()
+    private let limit: Int
+    private var later: [URL: [URL]] = [:]
+    private var order: [URL] = []
+
+    init(limit: Int) { self.limit = limit }
+
+    func remember(_ urls: [URL], after url: URL) {
+        lock.withLock {
+            if later.updateValue(urls, forKey: url) == nil { order.append(url) }
+            while order.count > limit { later[order.removeFirst()] = nil }
+        }
+    }
+
+    func after(_ url: URL) -> [URL] { lock.withLock { later[url] ?? [] } }
+    var count: Int { lock.withLock { later.count } }
 }
