@@ -115,11 +115,73 @@ import Testing
     }
 
     @Test func aHeldQuestionGoesAfterTheLimitWithWhatIsReady() {
-        let start = Date(timeIntervalSince1970: 1000)
-        #expect(!AskScope.holdExpired(since: start, now: start.addingTimeInterval(119)))
-        #expect(AskScope.holdExpired(since: start, now: start.addingTimeInterval(120)))
         #expect(AskScope.sendPlan(readyCount: 1, reading: true, failure: nil) == .hold)
         #expect(AskScope.sendPlan(readyCount: 1, reading: true, failure: nil, timedOut: true) == .send)
         #expect(AskScope.missingNote(titles: ["Lesson"]).contains("“Lesson” did not arrive"))
+    }
+
+    @MainActor @Test func theHoldGivesUpWhenTheInjectedClockPassesTheLimit() async {
+        var now = ContinuousClock.now
+        let start = now
+        var sleeps = 0
+        // A wait that ignores the limit is stopped after ten polls, so it fails here instead of hanging.
+        let timedOut = await HeldWait.wait(
+            reading: { true }, cancelled: { sleeps >= 10 }, now: { now },
+            sleep: { _ in
+                sleeps += 1
+                now = start + .seconds(sleeps * 30)
+            })
+        #expect(timedOut)
+        #expect(sleeps == 4)
+    }
+
+    @MainActor @Test func theHoldEndsEarlyWhenTheReadFinishes() async {
+        var reading = true
+        var sleeps = 0
+        let now = ContinuousClock.now
+        let timedOut = await HeldWait.wait(
+            reading: { reading }, cancelled: { sleeps >= 10 }, now: { now },
+            sleep: { _ in
+                sleeps += 1
+                reading = false
+            })
+        #expect(!timedOut)
+        #expect(sleeps == 1)
+    }
+
+    @Test func askingLocksTheChatAndAPickerMoveUnlocksIt() {
+        var state = AskLockState()
+        state.lock(["a", "f"])
+        #expect(state.ids == ["a", "f"])
+        state.reset()
+        #expect(state.ids == nil)
+    }
+
+    @Test func aSummaryThatFinishesLoadingAfterTheScopeChangedDoesNotLock() {
+        var state = AskLockState()
+        let asked = state.generation
+        state.reset()  // the user switched scope meanwhile
+        let stale = state.lock(["a"], ifGeneration: asked)
+        #expect(!stale)
+        #expect(state.ids == nil)
+        let fresh = state.lock(["b"], ifGeneration: state.generation)
+        #expect(fresh)
+        #expect(state.ids == ["b"])
+    }
+
+    @Test func theTimeOutNoteNamesFailedAndStuckRecordsAndTheWindowShowsIt() {
+        let missing = AskScope.missingRecords([
+            (id: "ok", hasCapture: true, reading: false, failed: false),
+            (id: "stuck", hasCapture: false, reading: true, failed: false),
+            (id: "broke", hasCapture: false, reading: false, failed: true),
+        ])
+        #expect(missing == ["stuck", "broke"])
+        let note = ChatMessage(role: .assistant, text: "note", failed: true)
+        let messages = [
+            ChatMessage(role: .user, text: "old"), ChatMessage(role: .assistant, text: "old answer"), note,
+            ChatMessage(role: .user, text: "q"), ChatMessage(role: .assistant, text: "answer"),
+        ]
+        #expect(AskScope.notes(in: messages) == ["note"])
+        #expect(AskScope.notes(in: [ChatMessage(role: .user, text: "q")]).isEmpty)
     }
 }

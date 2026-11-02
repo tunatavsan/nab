@@ -201,17 +201,23 @@ final class CaptureCenter {
     /// so a pin added once by its short link and once by its own link is one entry.
     private func expand(_ url: URL, title: String?, announce: Bool, copyMark: Int?) {
         if announce { show(.init(tone: .working, title: "Opening the link…", detail: url.absoluteString), hold: true) }
-        let registry = registry
         Task {
-            do {
-                let full = try await registry.expand(url)
-                guard registry.match(full) != nil else {
-                    throw NabError("The link led to \(full.host() ?? "a page") Nab doesn't read.")
-                }
-                add(full, title: title, announce: announce, copyMark: copyMark)
-            } catch {
-                show(.init(tone: .failed, title: "Couldn't open the link", detail: error.localizedDescription))
+            if let full = await openedLink(url) { add(full, title: title, announce: announce, copyMark: copyMark) }
+        }
+    }
+
+    /// A short link's own address, or nil after showing why it could not be opened. Both shortcuts use it, so the
+    /// failure reads the same wherever it comes from.
+    func openedLink(_ url: URL) async -> URL? {
+        do {
+            let full = try await registry.expand(url)
+            guard registry.match(full) != nil else {
+                throw NabError("The link led to \(full.host() ?? "a page") Nab doesn't read.")
             }
+            return full
+        } catch {
+            show(.init(tone: .failed, title: "Couldn't open the link", detail: error.localizedDescription))
+            return nil
         }
     }
 
