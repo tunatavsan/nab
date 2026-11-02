@@ -194,7 +194,7 @@ struct HomePage: View {
 
     /// The entry whose context Nab's auto-copy put on the clipboard, while the clipboard still holds it.
     private func refreshClipboard() {
-        guard let text = NSPasteboard.general.string(forType: .string), !center.copiedIDs.isEmpty else {
+        guard let text = Pasteboard.board.string(forType: .string), !center.copiedIDs.isEmpty else {
             clipboardID = nil
             return
         }

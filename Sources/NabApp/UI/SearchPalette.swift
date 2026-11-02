@@ -319,7 +319,7 @@ struct SearchPalette: View {
     }
 
     private func refreshClipboard() {
-        let text = NSPasteboard.general.string(forType: .string) ?? ""
+        let text = Pasteboard.board.string(forType: .string) ?? ""
         clipboardLink = center.registry.links(in: text).first
     }
 }

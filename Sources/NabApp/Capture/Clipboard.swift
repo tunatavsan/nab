@@ -10,15 +10,15 @@ extension Pasteboard {
         switch payload {
         case .text(let text): copy(text)
         case .files(let files):
-            let board = NSPasteboard.general
+            let board = Pasteboard.board
             board.clearContents()
             let items = files.map { file -> NSPasteboardItem in
                 let item = NSPasteboardItem()
                 item.setString(file.absoluteString, forType: .fileURL)
                 return item
             }
-            if files.count == 1, let file = files.first, let type = UTType(filenameExtension: file.pathExtension),
-                type.conforms(to: .image), let data = try? Data(contentsOf: file)
+            if let file = payload.loneImage, let type = UTType(filenameExtension: file.pathExtension),
+                let data = try? Data(contentsOf: file)
             {
                 items[0].setData(data, forType: NSPasteboard.PasteboardType(type.identifier))
                 if type != .png, type != .tiff, let tiff = NSImage(data: data)?.tiffRepresentation {

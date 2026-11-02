@@ -145,10 +145,11 @@ struct MediaTests {
 
     @Test func packListsPhotosAndClipsWithTheirFiles() {
         var capture = Self.pin([Self.photo, Self.clip])
-        capture.media[0].savedPath = "/Users/someone/Downloads/Nab/Paper lamp (Pinterest 100200300) 1.png"
+        capture.media[0].savedPath = "/Volumes/Archive/Nab/Paper lamp (Pinterest 100200300) 1.png"
         let pack = ContextPack.source(capture)
         #expect(pack.contains("- By: maker\n- Media: 1 video and 1 photo\n"))
-        #expect(pack.contains("## Media\n- Photo · 1000×1500 · /Users/someone/Downloads/Nab/Paper lamp"))
+        #expect(pack.contains("## Media\n- Photo · 1000×1500 · Paper lamp (Pinterest 100200300) 1.png\n"))
+        #expect(!pack.contains("/Volumes/Archive"))
         #expect(pack.contains("- Video · 1080×1920 · 0:42 · https://v1.pinimg.com/videos/mc/720p/aa/bb/cc/abc.mp4\n"))
         #expect(pack.contains("## Description\nFolded from one sheet."))
         #expect(!pack.contains("Transcript:"))

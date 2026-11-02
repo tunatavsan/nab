@@ -1,4 +1,5 @@
 import Foundation
+import UniformTypeIdentifiers
 
 /// What "Copy" (and a drag) hands to the next app: the thing that app should receive. Photos and clips go as their
 /// files; an item read as text goes as its context pack.
@@ -17,6 +18,15 @@ public enum CopyPayload: Equatable, Sendable {
     public static func session(_ captures: [Capture], capturedAt: Date = .now) -> CopyPayload {
         if !captures.isEmpty, captures.allSatisfy(\.isMedia), let files = savedFiles(captures) { return .files(files) }
         return .text(ContextPack.render(captures, capturedAt: capturedAt))
+    }
+
+    /// The photo in a copy of exactly one photo: it also goes as picture data, so an image editor or a chat gets the
+    /// picture while Finder gets the file. Nil for text, a clip, or several files.
+    public var loneImage: URL? {
+        guard case .files(let files) = self, files.count == 1, let file = files.first,
+            let type = UTType(filenameExtension: file.pathExtension), type.conforms(to: .image)
+        else { return nil }
+        return file
     }
 
     /// Saved files that are no longer where Nab put them; checked when they are used, never while drawing.

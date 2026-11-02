@@ -40,6 +40,14 @@ final class MediaStub: URLProtocol, @unchecked Sendable {
     override func stopLoading() {}
 }
 
+/// Progress reports as they arrive, from any thread.
+final class Reports: @unchecked Sendable {
+    private let lock = NSLock()
+    private var all: [(Int64, Int64?)] = []
+    func add(_ received: Int64, _ expected: Int64?) { lock.withLock { all.append((received, expected)) } }
+    var last: (Int64, Int64?)? { lock.withLock { all.last } }
+}
+
 @Suite("Saving photos and clips")
 struct DownloaderTests {
     let folder = FileManager.default.temporaryDirectory.appending(path: "nab-dl-\(UUID().uuidString)")
@@ -58,8 +66,12 @@ struct DownloaderTests {
         let body = Data((0..<200_000).map { UInt8($0 % 251) })
         MediaStub.set("/ok.png", [.init(status: 200, body: body)])
         let file = folder.appending(path: "Lamp (Pinterest 1).png")
-        let size = try await downloader().download(URL(string: "https://media.example/ok.png")!, to: file)
+        let reports = Reports()
+        let size = try await downloader().download(URL(string: "https://media.example/ok.png")!, to: file) {
+            reports.add($0, $1)
+        }
         #expect(size == Int64(body.count))
+        #expect(reports.last?.0 == size && reports.last?.1 == size)
         #expect(try Data(contentsOf: file) == body)
         #expect(leftovers() == ["Lamp (Pinterest 1).png"])
     }

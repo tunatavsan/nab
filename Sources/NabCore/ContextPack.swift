@@ -36,11 +36,13 @@ public enum ContextPack {
         }
         out += facts.map { "- \($0)" }.joined(separator: "\n") + "\n"
         if c.isMedia {
-            // Each file as the user has it: the saved copy when there is one, else where the source keeps it.
+            // Each file by the name the user has it under, else where the source keeps it. Never a full path: the
+            // pack goes to an AI service, and the path would name the user's folders.
             out += "\n## Media\n"
-            out +=
-                c.media.map { "- \(RackText.mediaLine($0)) · \(inert($0.savedPath ?? $0.url.absoluteString))" }
-                .joined(separator: "\n") + "\n"
+            let lines = c.media.map { media in
+                "- \(RackText.mediaLine(media)) · \(inert(media.savedURL?.lastPathComponent ?? media.url.absoluteString))"
+            }
+            out += lines.joined(separator: "\n") + "\n"
         }
 
         if let ai = c.aiSummary?.trimmingCharacters(in: .whitespacesAndNewlines), !ai.isEmpty {
