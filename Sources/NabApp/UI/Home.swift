@@ -57,18 +57,17 @@ struct HomePage: View {
             Text("Library").font(Typeface.largeTitle).tracking(Typeface.largeTitleTracking)
                 .foregroundStyle(Palette.ink)
                 .accessibilityAddTraits(.isHeader)
-            let videos = center.entries.count
             let chats = model.assistant.conversations.count
-            Text("\(videos) video\(videos == 1 ? "" : "s") · \(chats) chat\(chats == 1 ? "" : "s")")
+            Text("\(RackText.count(Tally(center.entries))) · \(chats) chat\(chats == 1 ? "" : "s")")
                 .font(Typeface.body).foregroundStyle(Palette.inkTertiary)
             Spacer(minLength: 0)
             SegmentedPicker(
-                [(HomeFilter.all, "All"), (.videos, "Videos"), (.chats, "Chats")], selection: $filter)
+                [(HomeFilter.all, "All"), (.videos, "Saved"), (.chats, "Chats")], selection: $filter)
         }
     }
 
     private var emptyFilter: some View {
-        Text(filter == .chats ? "No chats yet. Ask AI about a video to start one." : "Nothing here.")
+        Text(filter == .chats ? "No chats yet. Ask AI about something you nabbed to start one." : "Nothing here.")
             .font(Typeface.body).foregroundStyle(Palette.inkTertiary)
             .frame(maxWidth: .infinity, minHeight: 160)
     }
@@ -83,14 +82,14 @@ struct HomePage: View {
                 SectionHeader(
                     title: "This session",
                     detail:
-                        "\(session.allEntryIDs.count) video\(session.allEntryIDs.count == 1 ? "" : "s") · since \(clock(session.start))",
+                        "\(RackText.count(Tally(session.allEntryIDs.compactMap { center.entry($0) }))) · since \(clock(session.start))",
                     live: true)
                 NabButton("End session", combo: shortcuts.combo(for: .newSession), kind: .ghost) {
                     center.closeSession(announce: true)
                 }
-                .help("Close this session; the next video starts a new one")
+                .help("Close this session; the next nab starts a new one")
                 NabButton("Copy all", combo: shortcuts.combo(for: .copySession)) { center.copySession() }
-                    .help("Copy the session's videos as one context pack")
+                    .help("Copy the whole session")
                 NabButton("Ask AI", combo: shortcuts.combo(for: .summarize), kind: .primary) { model.ask(about: ready) }
                     .disabled(ready.isEmpty)
                     .help("Ask about the session")
@@ -108,7 +107,7 @@ struct HomePage: View {
 
     // MARK: Grid
 
-    /// A card on the grid: a video or a chat.
+    /// A card on the grid: a saved item or a chat.
     private enum Cell: Identifiable {
         case video(Entry)
         case chat(ChatPreview)
@@ -175,7 +174,9 @@ struct HomePage: View {
     private func card(_ cell: Cell, width: CGFloat, large: Bool) -> some View {
         switch cell {
         case .video(let entry):
-            VideoCard(entry: entry, model: model, width: width, small: !large, onClipboard: clipboardID == entry.id)
+            VideoCard(
+                entry: entry, model: model, width: width, small: !large, onClipboard: clipboardID == entry.id,
+                saving: center.savingProgress[entry.id])
         case .chat(let chat):
             ChatCard(chat: chat, model: model, width: width, small: !large)
         }
@@ -200,15 +201,18 @@ struct HomePage: View {
         }
         clipboardID =
             center.entries.first {
-                center.copiedIDs.contains($0.id) && $0.capture.map { ContextPack.render([$0]) == text } == true
+                center.copiedIDs.contains($0.id) && $0.canShowClipboardMark
+                    && $0.capture.map { ContextPack.render([$0]) == text } == true
             }?.id
     }
 }
 
 // MARK: Cards
 
-/// "author · language · ~13k tokens" for a ready entry; the phase otherwise.
-@MainActor private func metaText(_ entry: Entry) -> String {
+/// "Photo · 1000×1500" or "Saving… 42%" for a photo or clip; "author · language · ~13k tokens" for a ready record
+/// read as text; the phase otherwise.
+@MainActor private func metaText(_ entry: Entry, saving: Double?) -> String {
+    if let line = entry.cardLine(saving: saving) { return line }
     guard entry.phase == .ready, let capture = entry.capture else { return entry.metaLine }
     var parts: [String] = []
     if let author = capture.author { parts.append(author) }
@@ -242,6 +246,7 @@ private struct VideoCard: View {
     let width: CGFloat
     var small = false
     var onClipboard = false
+    var saving: Double?
     @State private var hovering = false
 
     var body: some View {
@@ -265,7 +270,7 @@ private struct VideoCard: View {
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
                     if !small {
-                        Text(metaText(entry))
+                        Text(metaText(entry, saving: saving))
                             .font(Typeface.meta)
                             .foregroundStyle(entry.phase == .failed ? Palette.error : Palette.inkTertiary)
                             .lineLimit(1)
@@ -280,7 +285,7 @@ private struct VideoCard: View {
         .onHover { over in withAnimation(Motion.snap) { hovering = over } }
         .entryContextMenu(entry, model: model)
         .accessibilityLabel(entry.title)
-        .accessibilityHint(metaText(entry))
+        .accessibilityHint(metaText(entry, saving: saving))
     }
 }
 

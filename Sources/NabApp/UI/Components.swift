@@ -1,3 +1,4 @@
+import AVFoundation
 import AppKit
 import NabCore
 import SwiftUI
@@ -265,7 +266,7 @@ struct Thumbnail: View {
         ZStack {
             Palette.well
             // A thumbnail seen before is drawn in the first frame; only one loading for the first time fades in.
-            if let image = ThumbnailCache.cached(entry.thumbnailURL) ?? loaded {
+            if let image = ThumbnailCache.cached(entry.cardCovers) ?? loaded {
                 Image(nsImage: image).resizable().aspectRatio(contentMode: .fill).transition(.opacity)
             }
             switch entry.phase {
@@ -309,9 +310,9 @@ struct Thumbnail: View {
         .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(Palette.line))
         .animation(Motion.snap, value: entry.phase)
         .accessibilityLabel(entry.title)
-        .task(id: entry.thumbnailURL) {
-            guard let url = entry.thumbnailURL, ThumbnailCache.cached(url) == nil else { return }
-            let image = await ThumbnailCache.image(url)
+        .task(id: entry.cardCovers) {
+            guard ThumbnailCache.cached(entry.cardCovers) == nil else { return }
+            let image = await ThumbnailCache.image(entry.cardCovers)
             withAnimation(Motion.snap) { loaded = image }
         }
     }
@@ -324,13 +325,50 @@ enum ThumbnailCache {
 
     static func cached(_ url: URL?) -> NSImage? { url.flatMap { cache.object(forKey: $0 as NSURL) } }
 
+    /// The first of `urls` already in memory.
+    static func cached(_ urls: [URL]) -> NSImage? { urls.lazy.compactMap { cached($0) }.first }
+
+    /// The first of `urls` that loads.
+    static func image(_ urls: [URL]) async -> NSImage? {
+        for url in urls { if let image = await image(url) { return image } }
+        return nil
+    }
+
+    /// A cover from the web, or from a file on this Mac: a photo scaled down, or a clip's first frame.
     static func image(_ url: URL) async -> NSImage? {
         if let hit = cached(url) { return hit }
-        guard let (data, response) = try? await URLSession.shared.data(from: url),
-            (response as? HTTPURLResponse)?.statusCode == 200, let image = NSImage(data: data)
-        else { return nil }
+        let image: NSImage?
+        if url.isFileURL {
+            let frame = await local(url)
+            image = frame.map { NSImage(cgImage: $0, size: .zero) }
+        } else {
+            guard let (data, response) = try? await URLSession.shared.data(from: url),
+                (response as? HTTPURLResponse)?.statusCode == 200
+            else { return nil }
+            image = NSImage(data: data)
+        }
+        guard let image else { return nil }
         cache.setObject(image, forKey: url as NSURL)
         return image
+    }
+
+    /// Covers are drawn small, so a file is read at most this many pixels on its long side.
+    private nonisolated static let localSide = 640
+
+    private nonisolated static func local(_ file: URL) async -> CGImage? {
+        if let type = UTType(filenameExtension: file.pathExtension), type.conforms(to: .audiovisualContent) {
+            let generator = AVAssetImageGenerator(asset: AVURLAsset(url: file))
+            generator.appliesPreferredTrackTransform = true
+            generator.maximumSize = CGSize(width: localSide, height: localSide)
+            return try? await generator.image(at: .zero).image
+        }
+        guard let source = CGImageSourceCreateWithURL(file as CFURL, nil) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: localSide,
+        ]
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
     }
 }
 
@@ -663,11 +701,11 @@ struct SectionHeader: View {
 
 /// The toolbar's search field. It only looks like one; a click opens the palette.
 struct SearchPill: View {
-    var placeholder = "Search videos, chats and transcripts"
+    var placeholder = "Search titles, chats and transcripts"
     let action: () -> Void
     @State private var hovering = false
 
-    init(placeholder: String = "Search videos, chats and transcripts", action: @escaping () -> Void) {
+    init(placeholder: String = "Search titles, chats and transcripts", action: @escaping () -> Void) {
         self.placeholder = placeholder
         self.action = action
     }
@@ -722,9 +760,10 @@ struct PhaseMark: View {
 extension Entry {
     var metaLine: String {
         switch phase {
-        case .fetching, .saving: return "Fetching transcript…"
+        case .fetching, .saving: return "Fetching…"
         case .failed: return failure ?? "Failed"
         case .ready:
+            if let line = cardLine() { return line }
             var parts: [String] = []
             if let author = capture?.author { parts.append(author) }
             if let transcript = capture?.transcript {
@@ -736,7 +775,23 @@ extension Entry {
         }
     }
 
-    var durationText: String { capture?.duration.map(Timecode.string) ?? "" }
+    /// The length of a transcript record; a photo or clip says it in its kind line instead.
+    var durationText: String {
+        guard capture?.isMedia != true else { return "" }
+        return capture?.duration.map(Timecode.string) ?? ""
+    }
+
+    /// The line under a title on a card for a photo or clip: "Photo · 1000×1500", "Video · 0:57", "5 videos", or
+    /// "Saving… 42%" while its files arrive (`saving` is the share so far). Nil for a record read as text, whose
+    /// card says more, and for one that failed.
+    func cardLine(saving progress: Double? = nil) -> String? {
+        guard phase != .failed, let capture else { return nil }
+        return RackText.kindLine(capture, saving: progress ?? (phase == .saving ? 0 : nil))
+    }
+
+    /// Whether the card may say "On clipboard": a copied file is not told from the clipboard's text, so a photo or
+    /// clip never does.
+    var canShowClipboardMark: Bool { capture?.isMedia != true }
 }
 
 // MARK: Output
@@ -768,7 +823,8 @@ enum Exporter {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [UTType(filenameExtension: "md") ?? .plainText]
         panel.nameFieldStringValue =
-            (captures.count == 1 ? captures[0].title : "Nab — \(captures.count) videos")
+            (captures.count == 1
+            ? captures[0].title : "Nab — \(RackText.count(Tally(captures: captures)))")
             .replacingOccurrences(of: "/", with: "-") + ".md"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {

@@ -17,14 +17,10 @@ import Testing
         #expect(RackText.hints(map: map, unavailable: [.copySession, .summarize]).isEmpty)
     }
 
-    @Test func headerPluralizes() {
-        #expect(RackText.header(count: 1) == "Session · 1 video")
-        #expect(RackText.header(count: 3) == "Session · 3 videos")
-    }
-
-    @Test func videosPluralizes() {
-        #expect(RackText.videos(1) == "1 video")
-        #expect(RackText.videos(4) == "4 videos")
+    @Test func headerCountsByKind() {
+        #expect(RackText.header(Tally(videos: 1)) == "Session · 1 video")
+        #expect(RackText.header(Tally(videos: 2, photos: 1)) == "Session · 2 videos and 1 photo")
+        #expect(RackText.header(Tally(photos: 3)) == "Session · 3 photos")
     }
 
     @Test func tokensRoundToThousands() {
@@ -62,7 +58,12 @@ import Testing
             entry("c", at: now.addingTimeInterval(-86_400 * 2), inTray: false),
         ]
         #expect(RackText.earlierTodayCount(entries, now: now, calendar: calendar) == 1)
-        #expect(RackText.earlierToday(count: 1) == "Earlier today · 1 video")
+        #expect(RackText.earlierTodayEntries(entries, now: now, calendar: calendar).map(\.id) == ["b"])
+    }
+
+    @Test func earlierTodayNamesTheKinds() {
+        #expect(RackText.earlierToday(Tally(videos: 1)) == "Earlier today · 1 video")
+        #expect(RackText.earlierToday(Tally(videos: 2, photos: 2)) == "Earlier today · 2 videos and 2 photos")
     }
 
     @Test func stackSubtitleFollowsTheClipboard() {

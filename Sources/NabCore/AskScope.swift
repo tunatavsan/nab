@@ -51,10 +51,10 @@ public enum AskScope: Sendable, Hashable {
     }
 
     /// The small line over the answer: "SUMMARY · 3 VIDEOS", "SUMMARY · LEARN PYTHON", or the question itself.
-    public static func heading(summary: Bool, question: String?, count: Int, title: String?) -> String {
+    public static func heading(summary: Bool, question: String?, tally: Tally, title: String?) -> String {
         guard summary else { return question?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "" }
-        if count == 1, let title { return "SUMMARY · " + shortTitle(title).uppercased() }
-        return "SUMMARY · " + RackText.videos(count).uppercased()
+        if tally.total == 1, let title { return "SUMMARY · " + shortTitle(title).uppercased() }
+        return "SUMMARY · " + RackText.count(tally).uppercased()
     }
 
     /// The title up to its first dash, colon or bar, at most 32 characters.
@@ -107,10 +107,9 @@ public enum AskScope: Sendable, Hashable {
         chatIsEmpty && !busy && !waiting
     }
 
-    /// What a held question says while its record is still being read.
-    public static func waitingLabel(isMedia: Bool) -> String {
-        isMedia ? "Waiting for the details…" : "Waiting for the transcript…"
-    }
+    /// What a held question says while its record is still being read. The same for every kind of record: what
+    /// arrives is not known until the capture does.
+    public static let waitingLabel = "Waiting for the details…"
 
     /// Only a send in the session scope uses the open session up. A question about one record (the front tab, the
     /// latest, a handed-in pin) leaves it open, so the next nab still joins it.
@@ -125,11 +124,10 @@ public enum AskScope: Sendable, Hashable {
 
     /// What becomes of a question held for a capture: it goes out once any record is ready, and the chat shows the
     /// reason when none will be.
-    public static func resolveHeld(readyCount: Int, failure: String?, isMedia: Bool) -> Resolution {
+    public static func resolveHeld(readyCount: Int, failure: String?) -> Resolution {
         if readyCount > 0 { return .send }
         if let failure, !failure.isEmpty { return .fail(failure) }
-        let what = isMedia ? "details" : "transcript"
-        return .fail("The \(what) did not arrive. Try again in a moment.")
+        return .fail("The details did not arrive. Try again in a moment.")
     }
 
     /// How long after a timecode click a mouse-down elsewhere is taken as part of that click's consequences (the

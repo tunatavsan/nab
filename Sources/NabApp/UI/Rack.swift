@@ -3,7 +3,7 @@ import NabCore
 import SwiftUI
 
 /// What the shortcuts just did, under the menu bar icon, without taking focus: one glass card that is
-/// fetching, on the clipboard, a stack for a session of several videos, or a plain message. The window
+/// fetching or saving, on the clipboard, a stack for a session of several items, or a plain message. The window
 /// drops in and lifts out with the same Core Animation spring as the panel; the card inside changes with a
 /// SwiftUI spring and the window's height follows it.
 @MainActor
@@ -74,7 +74,7 @@ struct RackCard: Equatable {
     enum Kind: Equatable { case fetching, ready, stack, message }
 
     var kind: Kind
-    /// The video the card is about, if any.
+    /// The item the card is about, if any.
     var entry: Entry?
 
     @MainActor
@@ -83,8 +83,8 @@ struct RackCard: Equatable {
         let match = session.first { $0.title == toast.title && $0.thumbnailURL == toast.thumbnail }
         switch toast.tone {
         case .working:
-            // Another video may have landed while this one still runs; the card is about the one in flight.
-            let running = session.first { $0.phase == .fetching } ?? match
+            // Another item may have landed while this one still runs; the card is about the one in flight.
+            let running = session.first { $0.phase == .fetching || $0.phase == .saving } ?? match
             return running.map { RackCard(kind: .fetching, entry: $0) } ?? RackCard(kind: .message)
         case .done where match != nil:
             return RackCard(kind: session.count > 1 ? .stack : .ready, entry: match)
@@ -159,11 +159,14 @@ private struct RackView: View {
     }
 
     @ViewBuilder private func content(_ card: RackCard, toast: CaptureCenter.Toast, session: [Entry]) -> some View {
-        let copied = card.entry.map { center.copiedIDs.contains($0.id) } ?? false
+        let copied = card.entry.map { center.copiedIDs.contains($0.id) && $0.canShowClipboardMark } ?? false
         switch card.kind {
         case .fetching:
-            FetchingCard(entry: card.entry, toast: toast, reduceMotion: reduceMotion)
-                .onTapGesture { open(card.entry?.id) }
+            FetchingCard(
+                entry: card.entry, toast: toast, saving: card.entry.flatMap { center.savingProgress[$0.id] },
+                reduceMotion: reduceMotion
+            )
+            .onTapGesture { open(card.entry?.id) }
         case .ready:
             ReadyCard(entry: card.entry, toast: toast, copied: copied)
                 .onTapGesture { open(card.entry?.id) }
@@ -193,24 +196,29 @@ private struct RackView: View {
 
 // MARK: Cards
 
+/// A card's cover: the first of `covers` that loads, so a saved photo or clip shows from its file on this Mac and
+/// the source's own cover stands in until then.
 private struct RackThumb: View {
-    let url: URL?
+    let covers: [URL]
     var width: CGFloat = RackMetrics.thumbWidth
     var radius: CGFloat = Radius.thumbSmall
+    @State private var loaded: NSImage?
 
     var body: some View {
         ZStack {
             Palette.well
-            AsyncImage(url: url) {
-                $0.resizable().aspectRatio(contentMode: .fill)
-            } placeholder: {
-                Color.clear
+            if let image = ThumbnailCache.cached(covers) ?? loaded {
+                Image(nsImage: image).resizable().aspectRatio(contentMode: .fill)
             }
         }
         .frame(width: width, height: width * 9 / 16)
         .clipShape(.rect(cornerRadius: radius, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(Palette.line))
         .accessibilityHidden(true)
+        .task(id: covers) {
+            guard ThumbnailCache.cached(covers) == nil else { return }
+            loaded = await ThumbnailCache.image(covers)
+        }
     }
 }
 
@@ -231,25 +239,34 @@ private struct CardSurface<Content: View>: View {
 private struct FetchingCard: View {
     let entry: Entry?
     let toast: CaptureCenter.Toast
+    /// The share of its files saved so far, while a photo or clip is being saved.
+    let saving: Double?
     let reduceMotion: Bool
+
+    private var line: String { entry?.cardLine(saving: saving) ?? "Fetching…" }
 
     var body: some View {
         CardSurface(kind: .fetching) {
             VStack(spacing: 10) {
                 HStack(spacing: 10) {
-                    RackThumb(url: entry?.thumbnailURL ?? toast.thumbnail)
+                    RackThumb(covers: entry?.cardCovers ?? [toast.thumbnail].compactMap { $0 })
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Fetching captions…").font(Typeface.meta).foregroundStyle(Palette.inkSecondary)
+                        Text(line).font(Typeface.meta).foregroundStyle(Palette.inkSecondary)
+                            .contentTransition(.numericText())
                         Text(entry?.title ?? toast.title)
                             .font(Typeface.rowTitle).foregroundStyle(Palette.ink).lineLimit(1)
                     }
                     Spacer(minLength: 0)
                 }
-                IndeterminateBar(still: reduceMotion)
+                if let saving {
+                    ProgressTrack(value: saving)
+                } else {
+                    IndeterminateBar(still: reduceMotion)
+                }
             }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Fetching captions, \(entry?.title ?? toast.title)")
+        .accessibilityLabel("\(line), \(entry?.title ?? toast.title)")
         .frameProbe("toast.update", Double(toast.pulse))
     }
 }
@@ -264,7 +281,7 @@ private struct ReadyCard: View {
     var body: some View {
         CardSurface(kind: .ready) {
             HStack(spacing: 10) {
-                RackThumb(url: entry?.thumbnailURL ?? toast.thumbnail)
+                RackThumb(covers: entry?.cardCovers ?? [toast.thumbnail].compactMap { $0 })
                 VStack(alignment: .leading, spacing: 2) {
                     headline
                     Text(entry?.title ?? toast.title)
@@ -282,14 +299,15 @@ private struct ReadyCard: View {
 
     private var detail: String {
         if failed { return entry?.failure ?? toast.detail }
-        return entry?.detailLine ?? toast.detail
+        guard let entry else { return toast.detail }
+        return entry.cardLine() ?? entry.detailLine
     }
 
     @ViewBuilder private var headline: some View {
         HStack(spacing: 6) {
             if failed {
                 Image(systemName: "exclamationmark.circle.fill").font(Typeface.icon).foregroundStyle(Palette.error)
-                Text("Couldn't fetch captions").foregroundStyle(Palette.error)
+                Text("Couldn't nab this one").foregroundStyle(Palette.error)
             } else {
                 CheckDot()
                 if toast.detail.hasPrefix("Already") {
@@ -371,7 +389,7 @@ private struct StackCard: View {
             HStack(spacing: 10) {
                 stackedThumbs
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(RackText.header(count: session.count))
+                    Text(RackText.header(Tally(session)))
                         .font(Typeface.rowTitle).foregroundStyle(Palette.ink)
                         .contentTransition(.numericText())
                     Text(RackText.stackSubtitle(copied: copied))
@@ -399,7 +417,7 @@ private struct StackCard: View {
         let shown = Array(session.prefix(3))
         return ZStack(alignment: .topLeading) {
             ForEach(Array(shown.enumerated().reversed()), id: \.element.id) { index, entry in
-                RackThumb(url: entry.thumbnailURL, width: 44, radius: 5)
+                RackThumb(covers: entry.cardCovers, width: 44, radius: 5)
                     .offset(x: CGFloat(index) * 6, y: 8 - CGFloat(index) * 4)
             }
         }
@@ -454,6 +472,24 @@ private struct CheckDot: View {
                     .foregroundStyle(Palette.onAccent)
             }
             .accessibilityHidden(true)
+    }
+}
+
+/// A thin track filled to `value` (0…1) with lime, for files being saved.
+private struct ProgressTrack: View {
+    let value: Double
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .leading) {
+                Capsule().fill(Palette.line)
+                Capsule().fill(Palette.accentInk)
+                    .frame(width: proxy.size.width * min(max(value, 0), 1))
+            }
+        }
+        .frame(height: 3)
+        .animation(Motion.snap, value: value)
+        .accessibilityHidden(true)
     }
 }
 

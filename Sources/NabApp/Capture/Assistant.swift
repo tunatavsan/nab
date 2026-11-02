@@ -53,8 +53,9 @@ final class Assistant {
 
     /// Previews of `conversations`, built only for chats that changed since the last call.
     func previews(entries: [Entry]) -> [ChatPreview] {
-        let titles = Dictionary(entries.map { ($0.id, $0.title) }, uniquingKeysWith: { first, _ in first })
-        return previewCache.previews(for: conversations, titleOf: { titles[$0] })
+        let byID = Dictionary(entries.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        return previewCache.previews(
+            for: conversations, titleOf: { byID[$0]?.title }, tallyOf: { Tally($0.compactMap { byID[$0] }) })
     }
 
     // MARK: Provider
@@ -84,11 +85,6 @@ final class Assistant {
     func conversation(_ entryIDs: [String]) -> Conversation? { byID[Conversation.id(for: entryIDs)] }
     func isStreaming(_ entryIDs: [String]) -> Bool { streaming.contains(Conversation.id(for: entryIDs)) }
     func isWaiting(_ entryIDs: [String]) -> Bool { waiting[Conversation.id(for: entryIDs)] != nil }
-
-    /// "Waiting for the transcript…", or "…the details" for a photo or clip.
-    func waitingLabel(_ entryIDs: [String]) -> String {
-        AskScope.waitingLabel(isMedia: entryIDs.contains { center.isMedia($0) })
-    }
 
     /// Loads a saved chat the first time its videos are shown.
     func load(_ entryIDs: [String]) async {
@@ -158,7 +154,7 @@ final class Assistant {
             do {
                 for id in gone { try await store.deleteConversation(id) }
             } catch {
-                center.report(error, while: "removing chats of removed videos")
+                center.report(error, while: "removing chats of removed items")
             }
         }
     }
@@ -257,9 +253,7 @@ final class Assistant {
         guard !cancelled else { return }
         let ready = entryIDs.filter { center.entry($0)?.capture != nil }
         let failure = entryIDs.compactMap { center.entry($0)?.failure }.first
-        switch AskScope.resolveHeld(
-            readyCount: ready.count, failure: failure, isMedia: entryIDs.contains { center.isMedia($0) })
-        {
+        switch AskScope.resolveHeld(readyCount: ready.count, failure: failure) {
         case .send:
             send(question, to: entryIDs)
         case .fail(let reason):

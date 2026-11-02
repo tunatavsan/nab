@@ -16,14 +16,9 @@ public enum RackText {
         ].filter { !unavailable.contains($0.action) && map.combo(for: $0.action) != nil }
     }
 
-    /// "Session · 3 videos".
-    public static func header(count: Int) -> String {
-        "Session · \(count) video\(count == 1 ? "" : "s")"
-    }
-
-    /// "3 videos".
-    public static func videos(_ count: Int) -> String {
-        "\(count) video\(count == 1 ? "" : "s")"
+    /// "Session · 3 videos", "Session · 2 videos and 1 photo".
+    public static func header(_ tally: Tally) -> String {
+        "Session · \(count(tally))"
     }
 
     /// "2 videos and 3 photos", "4 photos", "1 video": every kind there is, in a fixed order.
@@ -92,16 +87,23 @@ public enum RackText {
         copied ? "On clipboard · ⌘V into any AI" : "Ready"
     }
 
-    /// How many saved videos from today sit outside the open session.
+    /// The saved items from today that sit outside the open session.
+    public static func earlierTodayEntries(
+        _ entries: [Entry], now: Date = .now, calendar: Calendar = .current
+    ) -> [Entry] {
+        entries.filter { !$0.inTray && calendar.isDate($0.addedAt, inSameDayAs: now) }
+    }
+
+    /// How many of them there are.
     public static func earlierTodayCount(
         _ entries: [Entry], now: Date = .now, calendar: Calendar = .current
     ) -> Int {
-        entries.filter { !$0.inTray && calendar.isDate($0.addedAt, inSameDayAs: now) }.count
+        earlierTodayEntries(entries, now: now, calendar: calendar).count
     }
 
-    /// "Earlier today · 4 videos".
-    public static func earlierToday(count: Int) -> String {
-        "Earlier today · \(videos(count))"
+    /// "Earlier today · 4 videos", "Earlier today · 2 photos".
+    public static func earlierToday(_ tally: Tally) -> String {
+        "Earlier today · \(count(tally))"
     }
 
     /// The line under "Session · 3 videos" on the stacked card.

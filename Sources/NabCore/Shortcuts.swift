@@ -7,7 +7,7 @@ public enum ShortcutAction: String, Codable, CaseIterable, Sendable {
     /// The row title in Settings.
     public var title: String {
         switch self {
-        case .nab: "Nab the YouTube tab in front"
+        case .nab: "Nab the tab in front"
         case .copySession: "Copy the whole session"
         case .summarize: "Ask AI about the session"
         case .newSession: "Start a new session"

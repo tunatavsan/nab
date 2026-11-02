@@ -302,7 +302,7 @@ final class LibraryModel {
         case .home: "Library"
         case .session(let ids):
             Set(ids) == Set(center.session.filter { $0.capture != nil }.map(\.id)) ? "This session" : "Chat"
-        case .video(let id): center.entry(id)?.title ?? "Video"
+        case .video(let id): center.entry(id)?.title ?? "Item"
         case .settings: "Settings"
         case .welcome: "Welcome"
         }
@@ -381,7 +381,7 @@ struct LibraryView: View {
         ToolbarItem(placement: .primaryAction) {
             NabButton("Nab a link", shortcut: "⇧⌘V", action: model.center.pasteLinks)
                 .keyboardShortcut("v", modifiers: [.command, .shift])
-                .help("Add every YouTube link on the clipboard (⇧⌘V)")
+                .help("Add every link on the clipboard (⇧⌘V)")
         }
         .sharedBackgroundVisibility(.hidden)
         ToolbarItem(placement: .primaryAction) {
@@ -457,7 +457,14 @@ struct EntryContextMenu: ViewModifier {
     func body(content: Content) -> some View {
         content.contextMenu {
             Button(entry.phase == .failed ? "Try Again" : "Fetch Again") { model.center.retry(entry.id) }
-            Button("Open in Browser") { PlaybackRouter.shared.openInBrowser(entryID: entry.id) }
+            Button("Open on \(entry.source.displayName)") {
+                // Only YouTube has a tab to bring forward; any other source opens its page.
+                if YouTubeID.id(fromEntryID: entry.id) != nil {
+                    PlaybackRouter.shared.openInBrowser(entryID: entry.id)
+                } else {
+                    NSWorkspace.shared.open(entry.url)
+                }
+            }
             Button("Copy Link") { Pasteboard.copy(entry.url.absoluteString) }
             Divider()
             Button("Remove from Library", role: .destructive) { model.remove(entry) }

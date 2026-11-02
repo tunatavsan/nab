@@ -412,14 +412,16 @@ private struct MenuPanelView: View {
     private func menu(earlier: Int) -> some View {
         VStack(spacing: 0) {
             MenuRow(
-                label: "Nab the YouTube tab in front",
+                label: "Nab the tab in front",
                 trailing: ShortcutStore.shared.isActive(.nab) ? nil : "no shortcut",
                 combo: ShortcutStore.shared.isActive(.nab) ? ShortcutStore.shared.combo(for: .nab) : nil,
                 action: actions.nabFrontTab)
             MenuRow(label: "Paste links", action: actions.pasteLinks)
             MenuRow(label: "Export session…", enabled: !center.trayCaptures.isEmpty, action: actions.exportTray)
             if earlier > 0 {
-                MenuRow(label: RackText.earlierToday(count: earlier), trailing: "›") { actions.openLibrary(nil) }
+                MenuRow(
+                    label: RackText.earlierToday(Tally(RackText.earlierTodayEntries(center.entries))), trailing: "›"
+                ) { actions.openLibrary(nil) }
             }
             Rectangle().fill(Palette.line).frame(height: 1).padding(.horizontal, Space.s).padding(.vertical, 4)
             MenuRow(label: "Open Library") { actions.openLibrary(nil) }
@@ -466,14 +468,16 @@ private struct SessionCell: View {
     }
 
     /// The entry whose context the auto-copy last put on the clipboard: the newest of those it copied.
-    private var clipboardID: String? { tray.first { center.copiedIDs.contains($0.id) }?.id }
+    private var clipboardID: String? {
+        tray.first { center.copiedIDs.contains($0.id) && $0.canShowClipboardMark }?.id
+    }
 
     private var header: some View {
         HStack(spacing: Space.s) {
             LiveDot()
             Text("This session").font(Typeface.rowTitle).foregroundStyle(Palette.ink)
             if !tray.isEmpty {
-                Text(RackText.videos(tray.count))
+                Text(RackText.count(Tally(tray)))
                     .font(Typeface.meta)
                     .foregroundStyle(Palette.inkTertiary)
                     .contentTransition(.numericText())
@@ -494,7 +498,7 @@ private struct SessionCell: View {
         let name = shortcuts.text(for: .nab) ?? "the shortcut"
         return Text(
             shortcuts.isActive(.nab)
-                ? "Press \(name) with a YouTube video in front, and it lands here."
+                ? "Press \(name) with a page Nab reads in front, and it lands here."
                 : shortcuts.combo(for: .nab) == nil
                     ? "Nab the tab from the list below, or set a shortcut in Settings."
                     : "Nab the tab from the list below; \(name) is in use by another app."
@@ -541,7 +545,14 @@ private struct TrayRow: View {
         .accessibilityHint("Opens it in the library")
         .contextMenu {
             if entry.phase == .failed { Button("Try Again") { center.retry(entry.id) } }
-            Button("Open Video") { PlaybackRouter.shared.openInBrowser(entryID: entry.id) }
+            Button("Open on \(entry.source.displayName)") {
+                // Only YouTube has a tab to bring forward; any other source opens its page.
+                if YouTubeID.id(fromEntryID: entry.id) != nil {
+                    PlaybackRouter.shared.openInBrowser(entryID: entry.id)
+                } else {
+                    NSWorkspace.shared.open(entry.url)
+                }
+            }
             Button("Copy Link") { Pasteboard.copy(entry.url.absoluteString) }
             if let capture = entry.capture {
                 Button("Summarize") { actions.summarize([entry.id]) }
@@ -554,9 +565,10 @@ private struct TrayRow: View {
 
     private var statusText: String {
         switch entry.phase {
-        case .fetching, .saving: "Fetching captions…"
+        case .fetching: "Fetching…"
+        case .saving: entry.cardLine(saving: center.savingProgress[entry.id]) ?? "Saving…"
         case .failed: entry.failure ?? "Failed"
-        case .ready: onClipboard ? "On clipboard" : entry.detailLine
+        case .ready: onClipboard && entry.canShowClipboardMark ? "On clipboard" : entry.cardLine() ?? entry.detailLine
         }
     }
 
@@ -569,7 +581,7 @@ private struct TrayRow: View {
             case .failed:
                 Text(statusText).foregroundStyle(Palette.error)
             case .ready:
-                if onClipboard {
+                if onClipboard && entry.canShowClipboardMark {
                     Image(systemName: "checkmark").font(Typeface.iconMicro).foregroundStyle(Palette.accentInk)
                     Text(statusText).foregroundStyle(Palette.ink)
                 } else {

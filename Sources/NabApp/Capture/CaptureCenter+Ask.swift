@@ -25,10 +25,4 @@ extension CaptureCenter {
             return nil
         }
     }
-
-    /// Whether the record behind `id` is a photo or clip rather than a transcript, known before its capture arrives.
-    func isMedia(_ id: String) -> Bool {
-        guard let entry = entry(id) else { return false }
-        return entry.capture?.isMedia ?? (entry.source != .youtube)
-    }
 }

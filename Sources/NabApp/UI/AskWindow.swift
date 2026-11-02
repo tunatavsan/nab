@@ -387,14 +387,15 @@ struct AskView: View {
         if ids.isEmpty {
             VStack(alignment: .leading, spacing: Space.xs) {
                 Text("Nothing to ask about yet").font(Typeface.heading).foregroundStyle(Palette.ink)
-                Text("Nab a YouTube video, then ask about it here.")
+                Text("Nab a link, then ask about it here.")
                     .font(Typeface.body).foregroundStyle(Palette.inkTertiary)
             }
         } else if let answer = messages.last(where: { $0.role == .assistant }) {
             let question = messages.last { $0.role == .user }
             Text(
                 AskScope.heading(
-                    summary: question?.isSummaryRequest ?? false, question: question?.text, count: ids.count,
+                    summary: question?.isSummaryRequest ?? false, question: question?.text,
+                    tally: Tally(ids.compactMap { center.entry($0) }),
                     title: ids.count == 1 ? center.entry(ids[0])?.title : nil)
             )
             .font(Typeface.label)
@@ -413,7 +414,7 @@ struct AskView: View {
                     if !model.holdsSummary { model.ensureSummary() }
                 }, onLater: model.later, problem: assistant.client.problem)
         } else if assistant.isWaiting(ids) {
-            ThinkingDots(label: assistant.waitingLabel(ids))
+            ThinkingDots(label: AskScope.waitingLabel)
         } else if model.holdsSummary && !busy {
             VStack(alignment: .leading, spacing: Space.m) {
                 Text("Ask a question below, or start with a summary.")
