@@ -178,7 +178,8 @@ private struct VideoContent: View {
             switch entry.phase {
             case .ready:
                 NabButton(
-                    "Ask AI about this", kind: .primary, size: .large, fullWidth: true, action: model.summarize)
+                    "Ask AI about this", kind: .primary, size: .large, fullWidth: true,
+                    action: { model.ask(about: [entry.id]) })
                 Grid(horizontalSpacing: Space.s, verticalSpacing: Space.s) {
                     GridRow {
                         NabButton(copiedContext ? "Copied" : (isMedia ? "Copy" : "Copy context"), fullWidth: true) {

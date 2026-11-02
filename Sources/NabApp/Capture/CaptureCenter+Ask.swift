@@ -11,14 +11,14 @@ extension CaptureCenter {
         case .success(let tab):
             // A short link names its item only after one request.
             guard let url = try? await registry.expand(tab.url), let match = registry.match(url) else {
-                dismissToast()
+                show(.init(tone: .failed, title: "Nothing to nab", detail: "Nab couldn't open this short link."))
                 return nil
             }
             add(url, title: Self.cleanTitle(tab.title))
             return match.entryID
         case .failure(let error):
             switch error {
-            case .notAllowed, .waitingForPermission:
+            case .notAllowed, .waitingForPermission, .scriptFailed:
                 show(.init(tone: .failed, title: "Nothing to nab", detail: error.message))
             default: dismissToast()
             }

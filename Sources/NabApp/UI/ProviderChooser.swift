@@ -24,7 +24,7 @@ struct ProviderChooser: View {
         self.problem = problem
     }
 
-    private static let offered: [ProviderKind] = ProviderKind.common + ProviderKind.more
+    private static let offered: [ProviderKind] = ProviderPriority.order
 
     private var ordered: [ProviderKind] {
         Self.offered.filter { ready.contains($0) } + Self.offered.filter { !ready.contains($0) }
