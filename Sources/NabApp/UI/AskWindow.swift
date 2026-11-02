@@ -433,7 +433,9 @@ struct AskView: View {
             case .waiting:
                 ThinkingDots(label: AskScope.waitingLabel)
             case .reading:
-                ThinkingDots(label: ids.count == 1 ? "Reading the transcript" : "Reading \(ids.count) transcripts")
+                ThinkingDots(
+                    label: AskScope.readingLabel(
+                        transcripts: ids.count { center.entry($0)?.capture?.transcript != nil }, total: ids.count))
             case .summarize:
                 VStack(alignment: .leading, spacing: Space.m) {
                     Text("Ask a question below, or start with a summary.")

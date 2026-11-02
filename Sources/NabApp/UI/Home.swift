@@ -284,7 +284,7 @@ private struct VideoCard: View {
         .buttonStyle(PressableStyle(scale: 0.98))
         .onHover { over in withAnimation(Motion.snap) { hovering = over } }
         .entryContextMenu(entry, model: model)
-        .dragSource(entry.capture)
+        .dragSource(entry, onMissing: model.center.noteMissing)
         .accessibilityLabel(entry.title)
         .accessibilityHint(metaText(entry, saving: saving))
     }
@@ -399,7 +399,7 @@ private struct SessionLabel: View {
         .accessibilityLabel("Session \(session.label)")
         .contextMenu {
             Button("Open Chat") { model.go(.session(session.allEntryIDs)) }
-            Button("Copy Context") { model.copyContext(of: ready) }.disabled(ready.isEmpty)
+            Button("Copy") { model.copy(ready) }.disabled(ready.isEmpty)
             Button("Summarize") { model.summarize(about: ready) }.disabled(ready.isEmpty)
         }
     }

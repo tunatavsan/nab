@@ -167,18 +167,7 @@ struct ChatView: View {
     }
 
     private var suggestions: [String] {
-        entryIDs.count == 1
-            ? [
-                "What is the main argument, and what backs it up?",
-                "List every tool, product and person mentioned.",
-                "What should I do differently after this?",
-                "Which parts can I skip?",
-            ]
-            : [
-                "Where do these agree, and where do they disagree?",
-                "Give each one three bullets.",
-                "Which one should I start with, and why?",
-            ]
+        AskScope.presets(single: entryIDs.count == 1, hasTranscript: ordered.contains { $0.capture?.transcript != nil })
     }
 
     // MARK: Composer
@@ -319,7 +308,8 @@ struct MessageView: View {
                 failure
             } else if message.text.isEmpty {
                 ThinkingDots(
-                    label: entryIDs.count == 1 ? "Reading the transcript" : "Reading \(entryIDs.count) transcripts")
+                    label: AskScope.readingLabel(
+                        transcripts: assistant.transcriptCount(entryIDs), total: entryIDs.count))
             } else {
                 MarkdownText(source: message.text, clock: reduceMotion ? nil : clock, active: activeCitation)
             }

@@ -111,10 +111,13 @@ private struct VideoContent: View {
             VStack(alignment: .leading, spacing: 14) {
                 if RecordActions.isEmbedded(playing: MiniPlayer.shared.embeddedVideoID, entryID: entry.id) {
                     EmbeddedPlayer()
-                } else if capture?.isMedia == true {
-                    RecordCover(entry: entry)
-                } else {
+                } else if playable {
                     VideoCover(entry: entry, onClipboard: model.center.copiedIDs.contains(entry.id))
+                        .dragSource(entry, onMissing: model.center.noteMissing)
+                } else {
+                    // Photos and clips, and anything not yet read: a cover that does not claim to play.
+                    RecordCover(entry: entry)
+                        .dragSource(entry, onMissing: model.center.noteMissing)
                 }
                 VStack(alignment: .leading, spacing: 6) {
                     Text(entry.title)
@@ -124,7 +127,6 @@ private struct VideoContent: View {
                         .fixedSize(horizontal: false, vertical: true)
                     status
                 }
-                .dragSource(capture)
                 chips
                 actions
                 if !chapters.isEmpty { chapterList }
@@ -140,7 +142,7 @@ private struct VideoContent: View {
             .saving where capture?.isMedia != true:
             HStack(spacing: Space.s) {
                 PhaseMark(phase: .fetching)
-                Text("Fetching transcript…")
+                Text("Fetching…")
             }
             .font(Typeface.meta)
             .foregroundStyle(Palette.inkSecondary)
@@ -195,7 +197,7 @@ private struct VideoContent: View {
                             NabButton("Fetch again", fullWidth: true) { model.center.retry(entry.id) }
                         } else {
                             NabButton("Export…", fullWidth: true, action: model.export)
-                                .help("Save the video's context as a Markdown file")
+                                .help("Save the context as a Markdown file")
                             NabButton("Fetch again", fullWidth: true) { model.center.retry(entry.id) }
                         }
                     }
@@ -212,6 +214,11 @@ private struct VideoContent: View {
 
     private var isMedia: Bool { capture?.isMedia == true }
 
+    /// A video read as text that the player can play. Not while the capture has yet to say what it is.
+    private var playable: Bool {
+        capture != nil && !isMedia && PlaybackRouter.canPlay(entryID: entry.id)
+    }
+
     /// Photos and clips go as their files; if one is gone nothing is copied and the page says so.
     private func copy() {
         guard let capture else { return }
@@ -225,7 +232,7 @@ private struct VideoContent: View {
     }
 
     private func openOnSource() {
-        if entry.source == .youtube {
+        if PlaybackRouter.canPlay(entryID: entry.id) {
             PlaybackRouter.shared.openInBrowser(entryID: entry.id)
         } else {
             NSWorkspace.shared.open(capture?.url ?? entry.url)
@@ -545,7 +552,7 @@ private struct VideoContent: View {
             switch entry.phase {
             case .fetching, .saving:
                 ProgressView().controlSize(.small)
-                Text("Fetching transcript…").font(Typeface.body).foregroundStyle(Palette.inkSecondary)
+                Text("Fetching…").font(Typeface.body).foregroundStyle(Palette.inkSecondary)
             case .failed:
                 Text(entry.failure ?? "Something went wrong.")
                     .font(Typeface.body)
@@ -554,8 +561,8 @@ private struct VideoContent: View {
                     .textSelection(.enabled)
                 NabButton("Try Again", kind: .primary) { model.center.retry(entry.id) }
             case .ready:
-                Text("This video has no captions.").font(Typeface.heading).foregroundStyle(Palette.ink)
-                Text("YouTube has none to give. Its details are still in the context pack.")
+                Text("This item has no captions.").font(Typeface.heading).foregroundStyle(Palette.ink)
+                Text("\(entry.source.displayName) has none to give. Its details are still in the context pack.")
                     .font(Typeface.body)
                     .foregroundStyle(Palette.inkSecondary)
             }

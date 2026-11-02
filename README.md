@@ -53,7 +53,7 @@ OpenAI API, OpenRouter, or a local model through Ollama or LM Studio.
 | **Sources** | **YouTube** videos, read as a transcript with details and chapters. **Pinterest** pins, read as photos and clips at full size, including idea pins (every page), carousels and `pin.it` share links. A new source is one target and one line; see [ARCHITECTURE.md](ARCHITECTURE.md). |
 | **Capture** | ⌃⌥N takes the front tab of Safari, Chrome, Arc, Brave, Edge, Vivaldi, Opera, Dia, Comet or Helium. Paste any number of links at once, or drive Nab from Shortcuts, Raycast and scripts through `nab://` URLs. |
 | **Photos and clips** | A pin's photos and clips are saved as files in the media folder while its card shows **Saving…** and a percentage. A pin you nab again is not downloaded twice, and a file you moved or deleted is saved again. See [Photos and clips](#photos-and-clips). |
-| **Copy and drag** | Copy, or drag a card, and the next app gets what suits the item: a pin's photos and clips as files (a single photo also as picture data), a video as its context pack. A session with a video in it copies as one context pack that lists the pins' files by name. |
+| **Copy and drag** | Copy, or drag a card, and the next app gets what suits the item: a pin's photos and clips as files (a single photo also as picture data), a video as its context pack. A session with a video in it copies as one context pack that lists the pins' files by name. Every copy works the same way, from a shortcut, a button, a menu or the search palette; when a saved file is gone, nothing goes on the clipboard and the rack offers **Save again**. |
 | **Sessions** | Videos nabbed close together form a session. A rack under the menu bar icon deals each one in as it arrives and the icon counts them. Copying or summarizing a session, ⌃⌥X, or five quiet minutes start the next one, and the library keeps each set together. |
 | **Transcript** | Details, chapters and captions in the video's original language, even when YouTube offers dubbed tracks, preferring a human-made track over automatic captions. |
 | **Context pack** | One block of text for any number of videos: tagged sources, an index, chapters, the description and the timecoded transcript. Copy it, or export it as Markdown. |
@@ -153,7 +153,7 @@ files in `~/Library/Application Support/Nab`; saved photos and clips are in the 
 | ⌘F | Find in the transcript (video page). |
 | ⌘↩ | Summarize, in an empty chat. |
 | ⇧⌘V | Add every YouTube and Pinterest link on the clipboard. |
-| ⇧⌘C | Copy the page's items. |
+| ⇧⌘C | Copy the page's items: photos and clips as files, one context pack when a video is among them. |
 | ⌘J | Ask AI about the current page. |
 
 **Settings › Shortcuts** records your own combination for any of the four global shortcuts. Settings also has **New

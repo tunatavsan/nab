@@ -111,6 +111,38 @@ public enum AskScope: Sendable, Hashable {
     /// arrives is not known until the capture does.
     public static let waitingLabel = "Waiting for the details…"
 
+    /// What the thinking dots say while the answer is being written: a transcript is read, anything else has only
+    /// its details (title, description, kind) to go on. `transcripts` of `total` records have a transcript.
+    public static func readingLabel(transcripts: Int, total: Int) -> String {
+        if total == 1 { return transcripts == 1 ? "Reading the transcript" : "Reading the details" }
+        return transcripts == total ? "Reading \(total) transcripts" : "Reading \(total) items"
+    }
+
+    /// The questions offered on an empty chat. For one record with no transcript (a photo, a clip) the questions
+    /// that depend on spoken words are left out.
+    public static func presets(single: Bool, hasTranscript: Bool) -> [String] {
+        guard single else {
+            return [
+                "Where do these agree, and where do they disagree?",
+                "Give each one three bullets.",
+                "Which one should I start with, and why?",
+            ]
+        }
+        guard hasTranscript else {
+            return [
+                "What is this, in a few lines?",
+                "What would I need to make something like it?",
+                "Which details stand out?",
+            ]
+        }
+        return [
+            "What is the main argument, and what backs it up?",
+            "List every tool, product and person mentioned.",
+            "What should I do differently after this?",
+            "Which parts can I skip?",
+        ]
+    }
+
     /// Only a send in the session scope uses the open session up. A question about one record (the front tab, the
     /// latest, a handed-in pin) leaves it open, so the next nab still joins it.
     public static func sendUsesSession(scope: AskScope, pinned: Bool, count: Int) -> Bool {

@@ -229,11 +229,10 @@ final class LibraryModel {
         Task { await assistant.summarizeIfNew(ids) }
     }
 
-    /// Puts the context of the ready videos among `ids` on the clipboard.
-    func copyContext(of ids: [String]) {
-        let captures = ids.compactMap { center.entry($0)?.capture }
-        guard !captures.isEmpty else { return }
-        Pasteboard.copy(ContextPack.render(captures))
+    /// Copies the ready items among `ids` the way every copy in Nab works (`CaptureCenter.copy`): files for photos and
+    /// clips, one context pack when anything is read as text, nothing but a note when a saved file is gone.
+    func copy(_ ids: [String]) {
+        center.copy(ids.compactMap { center.entry($0) })
     }
 
     /// Opens a video's page with its transcript scrolled to `seconds`.
@@ -269,10 +268,9 @@ final class LibraryModel {
 
     func pack() -> String { ContextPack.render(pageCaptures) }
 
-    func copyContext() {
-        let captures = pageCaptures
-        guard !captures.isEmpty else { return }
-        Pasteboard.copy(ContextPack.render(captures))
+    /// ⇧⌘C: copies the current page's items, or the open session from the home page.
+    func copyPage() {
+        copy(currentIDs.isEmpty ? center.sessionSummaryIDs() : currentIDs)
     }
 
     /// The current chat as plain text, for pasting elsewhere.
@@ -396,7 +394,7 @@ struct LibraryView: View {
         ZStack {
             Button("Ask AI", action: model.askAboutPage).keyboardShortcut("j", modifiers: .command)
             if model.route != .home {
-                Button("Copy context", action: model.copyContext).keyboardShortcut("c", modifiers: [.command, .shift])
+                Button("Copy", action: model.copyPage).keyboardShortcut("c", modifiers: [.command, .shift])
             }
         }
         .opacity(0)

@@ -23,6 +23,9 @@ final class PlaybackRouter {
     /// Simulations (`NAB_PLAYER_PROBE=1`) never reach real browsers: no tab is looked for, a new tab is only logged.
     private static let simulation = ProcessInfo.processInfo.environment["NAB_PLAYER_PROBE"] == "1"
 
+    /// Whether the player can play this record: it has a video behind it. Judged from the id, not from the source.
+    static func canPlay(entryID: String) -> Bool { YouTubeID.id(fromEntryID: entryID) != nil }
+
     func play(entryID: String, at seconds: TimeInterval) {
         guard let id = YouTubeID.id(fromEntryID: entryID) else { return }
         attempt(

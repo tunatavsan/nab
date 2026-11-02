@@ -32,11 +32,11 @@ struct FirstRunView: View {
     private var intro: some View {
         VStack(spacing: 14) {
             AppMark()
-            Text("Nab a video to start").font(Typeface.largeTitle).tracking(Typeface.largeTitleTracking)
+            Text("Nab a link to start").font(Typeface.largeTitle).tracking(Typeface.largeTitleTracking)
                 .foregroundStyle(Palette.ink)
                 .accessibilityAddTraits(.isHeader)
             Text(
-                "Nab turns a YouTube video into text an AI can read. It puts the transcript on your clipboard, ready to paste anywhere."
+                "\(RackText.supportedSources(center.registry.names)) It turns what it finds into text an AI can read and puts it on your clipboard, ready to paste anywhere."
             )
             .font(Typeface.reading).lineSpacing(5).foregroundStyle(Palette.inkSecondary)
             .multilineTextAlignment(.center)
@@ -46,12 +46,12 @@ struct FirstRunView: View {
 
     private var pasteField: some View {
         HStack(spacing: 10) {
-            TextField("Paste a YouTube link", text: $link)
+            TextField("Paste a \(sourceList) link", text: $link)
                 .textFieldStyle(.plain)
                 .font(Typeface.reading)
                 .focused($focused)
                 .onSubmit(nab)
-                .accessibilityLabel("YouTube link")
+                .accessibilityLabel("\(sourceList) link")
             NabButton("Nab", kind: .primary, size: .large, action: nab)
                 .disabled(link.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
@@ -63,6 +63,9 @@ struct FirstRunView: View {
                 .strokeBorder(focused ? Palette.accent : Palette.controlBorder, lineWidth: focused ? 1.5 : 1)
         )
     }
+
+    /// "YouTube or Pinterest", from the sources Nab reads.
+    private var sourceList: String { RackText.list(center.registry.names, "or") }
 
     private func nab() {
         let text = link.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -76,18 +79,18 @@ struct FirstRunView: View {
             let shortcuts = ShortcutStore.shared
             if center.shortcutAvailable {
                 step(
-                    KeyCaps(shortcuts.combo(for: .nab)), "Nab the tab you’re watching",
-                    "Works from any app while a YouTube tab is in front.")
+                    KeyCaps(shortcuts.combo(for: .nab)), "Nab the tab in front",
+                    "Works from any app while a \(sourceList) page is in front.")
             } else {
                 step(
                     KeyCaps(shortcuts.combo(for: .nab)),
                     "\(shortcuts.text(for: .nab) ?? "The shortcut") is in use by another app",
-                    "Use Front Tab in the menu bar panel to nab the tab you’re watching.")
+                    "Use Front Tab in the menu bar panel to nab the tab in front.")
             }
             step(KeycapRow(["⌘", "V"]), "Paste into any AI", "Claude, ChatGPT, a notes app. Nab already copied it.")
             step(
-                KeyCaps(shortcuts.combo(for: .summarize)), "Or ask right here",
-                "A floating window answers about everything in the session.")
+                KeyCaps(shortcuts.combo(for: .summarize)), "Or ask about it",
+                "Opens a window on the page in front. Nothing is sent until you ask or press Summarize.")
         }
     }
 

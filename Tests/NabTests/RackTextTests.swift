@@ -70,4 +70,17 @@ import Testing
         #expect(RackText.stackSubtitle(copied: true) == "Latest one is on your clipboard")
         #expect(RackText.stackSubtitle(copied: false) == "Copy all puts them on your clipboard")
     }
+
+    @Test func aRecordWithNeitherMediaNorTranscriptIsAnItem() {
+        let bare = Capture(source: .youtube, sourceID: "a", url: URL(string: "https://example.com/a")!, title: "A")
+        var spoken = bare
+        spoken.transcript = Transcript(
+            languageCode: "en", languageName: "English", isGenerated: false,
+            segments: [Segment(start: 0, duration: 1, text: "hi")])
+        #expect(Tally(captures: [bare]) == Tally(items: 1))
+        #expect(Tally(captures: [bare, spoken]) == Tally(videos: 1, items: 1))
+        var entry = Entry(id: "youtube:a", url: bare.url)
+        entry.capture = bare
+        #expect(Tally([entry]) == Tally(items: 1))
+    }
 }

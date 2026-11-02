@@ -541,7 +541,7 @@ private struct TrayRow: View {
         .buttonStyle(PressableStyle(scale: 0.98))
         .onHover { over in withAnimation(Motion.snap) { hovering = over } }
         .animation(Motion.snap, value: entry.phase)
-        .dragSource(entry.capture)
+        .dragSource(entry, onMissing: center.noteMissing)
         .accessibilityLabel("\(entry.title), \(statusText)")
         .accessibilityHint("Opens it in the library")
         .contextMenu {
@@ -555,9 +555,9 @@ private struct TrayRow: View {
                 }
             }
             Button("Copy Link") { Pasteboard.copy(entry.url.absoluteString) }
-            if let capture = entry.capture {
+            if entry.capture != nil {
                 Button("Summarize") { actions.summarize([entry.id]) }
-                Button("Copy Context") { Pasteboard.copy(ContextPack.render([capture])) }
+                Button("Copy") { center.copy([entry]) }
             }
             Divider()
             Button("Remove from Session") { center.removeFromTray(entry.id) }

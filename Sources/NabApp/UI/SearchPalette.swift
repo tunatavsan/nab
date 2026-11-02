@@ -291,11 +291,12 @@ struct SearchPalette: View {
         if ids.isEmpty { open(row) } else { model.ask(about: ids) }
     }
 
-    /// Copies the selection's context; false when the row has none, so ⌘C still copies the field's text.
+    /// Copies the selection like any copy in Nab; false when the row has nothing to copy, so ⌘C still copies the
+    /// field's text.
     private func copy(_ row: PaletteRow) -> Bool {
         let ids = entryIDs(row)
         guard ids.contains(where: { center.entry($0)?.capture != nil }) else { return false }
-        model.copyContext(of: ids)
+        model.copy(ids)
         model.searchQuery = nil
         return true
     }

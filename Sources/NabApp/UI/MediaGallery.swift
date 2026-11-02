@@ -71,6 +71,7 @@ private struct MediaTile: View {
                 }
             case .image(let image):
                 Image(nsImage: image).resizable().aspectRatio(contentMode: .fit)
+                    .accessibilityLabel(RackText.mediaLine(item))
             case .clip(let player):
                 ClipPlayer(player: player)
             case .missing:
@@ -92,8 +93,10 @@ private struct MediaTile: View {
             loaded = .waiting
             return
         }
-        let readable = await Task.detached { FileManager.default.fileExists(atPath: file.path) }.value
-        guard readable else {
+        // The same test as Copy: a file moved, deleted or cut short is missing.
+        let item = item
+        let intact = await Task.detached { item.isIntact(size: MediaProbe.fileSize(atPath: file.path)) }.value
+        guard intact else {
             loaded = .missing
             return
         }

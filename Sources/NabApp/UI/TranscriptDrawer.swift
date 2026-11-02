@@ -31,7 +31,7 @@ struct TranscriptDrawer: View {
             } else {
                 findField
                 if paragraphs.isEmpty {
-                    Text(entry.phase == .fetching ? "Fetching transcript…" : "This video has no captions.")
+                    Text(entry.phase == .fetching ? "Fetching…" : "This item has no captions.")
                         .font(Typeface.meta)
                         .foregroundStyle(Palette.inkTertiary)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
