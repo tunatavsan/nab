@@ -266,8 +266,6 @@ final class LibraryModel {
         return ids.compactMap { center.entry($0)?.capture }
     }
 
-    func pack() -> String { ContextPack.render(pageCaptures) }
-
     /// ⇧⌘C: copies the current page's items, or the open session from the home page.
     func copyPage() {
         copy(currentIDs.isEmpty ? center.sessionSummaryIDs() : currentIDs)
@@ -456,8 +454,8 @@ struct EntryContextMenu: ViewModifier {
         content.contextMenu {
             Button(entry.phase == .failed ? "Try Again" : "Fetch Again") { model.center.retry(entry.id) }
             Button("Open on \(entry.source.displayName)") {
-                // Only YouTube has a tab to bring forward; any other source opens its page.
-                if YouTubeID.id(fromEntryID: entry.id) != nil {
+                // Only a record the player can play has a tab to bring forward; any other opens its page.
+                if PlaybackRouter.canPlay(entryID: entry.id) {
                     PlaybackRouter.shared.openInBrowser(entryID: entry.id)
                 } else {
                     NSWorkspace.shared.open(entry.url)

@@ -221,13 +221,10 @@ private struct VideoContent: View {
 
     /// Photos and clips go as their files; if one is gone nothing is copied and the page says so.
     private func copy() {
-        guard let capture else { return }
-        guard CopyPayload.missing([capture]).isEmpty else {
-            withAnimation(Motion.snap) { blocked = true }
-            return
-        }
+        guard capture != nil else { return }
+        let copied = model.center.copy([entry]) { _ in withAnimation(Motion.snap) { blocked = true } }
+        guard copied != nil else { return }
         blocked = false
-        Pasteboard.write(CopyPayload.single(capture))
         flash($copiedContext)
     }
 

@@ -200,7 +200,7 @@ struct SearchPalette: View {
             hint("↑↓", "Move")
             hint("↵", "Open")
             hint("⌘↵", "Ask AI about the selection")
-            hint("⌘C", "Copy context")
+            hint("⌘C", "Copy the selection")
         }
         .frame(maxWidth: .infinity)
         .frame(height: 36)
