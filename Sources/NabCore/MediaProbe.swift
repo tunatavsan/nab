@@ -41,7 +41,8 @@ public enum MediaProbe {
     }
 
     /// A file already saved under `file`'s name: that name, or the same name with the extension a misnamed copy was
-    /// renamed to. It must be at the size it was saved at (`expected`), or above zero when that is not known.
+    /// renamed to. It must be at the size it was saved at (`expected`), or above zero when that is not known, so a
+    /// file cut short is never taken for the saved one.
     public static func existing(
         _ file: URL, size expected: Int64? = nil, fileManager: FileManager = .default
     ) -> URL? {
@@ -60,6 +61,22 @@ public enum MediaProbe {
             }
     }
 
+    /// `file`, or when anything is already there, the first free `name (2).ext`, `name (3).ext`… next to it: Nab never
+    /// writes over a file it did not just write. The number is in brackets because `name 2.ext` is already the name of
+    /// a pin's second page.
+    public static func freeName(for file: URL, fileManager: FileManager = .default) -> URL {
+        let stem = file.deletingPathExtension().lastPathComponent
+        let folder = file.deletingLastPathComponent()
+        var candidate = file
+        var number = 2
+        while fileManager.fileExists(atPath: candidate.path) {
+            let name = "\(stem) (\(number))"
+            candidate = folder.appending(path: file.pathExtension.isEmpty ? name : "\(name).\(file.pathExtension)")
+            number += 1
+        }
+        return candidate
+    }
+
     /// The size of the file at `path`, or nil when there is none.
     public static func fileSize(atPath path: String, fileManager: FileManager = .default) -> Int64? {
         (try? fileManager.attributesOfItem(atPath: path)[.size] as? NSNumber)?.int64Value
@@ -72,7 +89,8 @@ public enum MediaProbe {
     /// The name a file should have when its contents are another type than its extension says (`x.png` holding a
     /// JPEG), or nil when the name already fits.
     public static func corrected(_ file: URL, type: UTType?) -> URL? {
-        guard let type, let ext = type.preferredFilenameExtension else { return nil }
+        // A JPEG is named `.jpg`, as Pinterest and most of the web name it, not `.jpeg`.
+        guard let type, let ext = type == .jpeg ? "jpg" : type.preferredFilenameExtension else { return nil }
         if let current = UTType(filenameExtension: file.pathExtension), current.conforms(to: type) { return nil }
         return file.deletingPathExtension().appendingPathExtension(ext)
     }
@@ -82,7 +100,8 @@ extension SourceProvider {
     /// Saves one photo or clip of `capture` through this source and returns it as it now is on disk: its path, its
     /// size, and the size, length and type read from the file itself (a misnamed fallback copy is renamed to its real
     /// type). A file already in the folder under this item's name is kept and not downloaded again: the name carries
-    /// the source's id, so it can only be this item, saved before.
+    /// the source's id, so it can only be this item, saved before. Anything else under that name (the user's edit, a
+    /// file cut short) is left as it is, and the new copy takes a free numbered name next to it (`name (2).ext`).
     public func store(
         _ media: Media, of capture: Capture, at file: URL,
         progress: @escaping @Sendable (_ received: Int64, _ expected: Int64?) -> Void = { _, _ in }
@@ -93,9 +112,11 @@ extension SourceProvider {
             file = earlier
             facts = await MediaProbe.facts(of: file, kind: media.kind)
         } else {
+            file = MediaProbe.freeName(for: file)
             try await save(media, of: capture, to: file, progress: progress)
             facts = await MediaProbe.facts(of: file, kind: media.kind)
-            if let better = MediaProbe.corrected(file, type: facts?.type),
+            // A move refuses a name that is taken, so the rename to the real type never lands on another file.
+            if let better = MediaProbe.corrected(file, type: facts?.type).map({ MediaProbe.freeName(for: $0) }),
                 (try? FileManager.default.moveItem(at: file, to: better)) != nil
             {
                 file = better

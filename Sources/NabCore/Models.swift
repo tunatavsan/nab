@@ -125,10 +125,13 @@ public struct Media: Codable, Sendable, Hashable {
 
     public var savedURL: URL? { savedPath.map { URL(filePath: $0) } }
 
-    /// Whether a file of `size` bytes (nil: no file there) is this item's saved copy: the size it was saved at, or
-    /// any size above zero when that was not recorded.
-    public func isIntact(size: Int64?) -> Bool { Self.isIntact(size: size, expected: byteCount) }
+    /// Whether the file at this item's saved path, `size` bytes (nil: no file there), is still there to use. A file
+    /// the user edited since is theirs and is used as it is; only an absent or empty one is gone.
+    public static func isPresent(size: Int64?) -> Bool { (size ?? 0) > 0 }
 
+    /// Whether a file of `size` bytes found under this item's name, with no saved path to go by, can be taken as the
+    /// copy saved before: the size it was saved at, or any size above zero when that was not recorded. A file cut
+    /// short is not taken.
     static func isIntact(size: Int64?, expected: Int64?) -> Bool {
         guard let size, size > 0 else { return false }
         return expected.map { $0 == size } ?? true

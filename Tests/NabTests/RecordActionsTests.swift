@@ -21,11 +21,11 @@ import Testing
         let capture = pin(saved: ["/m/a.jpg", "/m/gone.jpg", nil])
         let files = RecordActions.finderFiles(capture, size: { $0 == "/m/gone.jpg" ? nil : 1 })
         #expect(files.map(\.path) == ["/m/a.jpg"])
-        // A file cut short is not handed to Finder either, the same as Copy.
-        var short = pin(saved: ["/m/a.jpg"])
-        short.media[0].byteCount = 10
-        #expect(RecordActions.finderFiles(short, size: { _ in 9 }).isEmpty)
-        #expect(RecordActions.finderFiles(short, size: { _ in 10 }).map(\.path) == ["/m/a.jpg"])
+        // A file the user edited since is still theirs and is selected; an emptied one is not, the same as Copy.
+        var edited = pin(saved: ["/m/a.jpg"])
+        edited.media[0].byteCount = 10
+        #expect(RecordActions.finderFiles(edited, size: { _ in 9 }).map(\.path) == ["/m/a.jpg"])
+        #expect(RecordActions.finderFiles(edited, size: { _ in 0 }).isEmpty)
     }
 
     @Test func aRecordReadAsTextHasNothingForFinder() {

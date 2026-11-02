@@ -82,22 +82,26 @@ picks up where it stopped.
 1. `MediaFolder.resolve` gives the folder: the `media.folder` setting, else `$NAB_DATA_DIR/Media` when that variable
    is set, else `~/Downloads/Nab`. `MediaFileName` names each file `Title (Source id)[ page].ext`, at most 100
    characters.
-2. `SourceProvider.store` saves one `Media`. A file already under that name, at the size it was saved at, is kept and not
-   downloaded again.
+2. `SourceProvider.store` saves one `Media`. A file already under that name, at the size it was saved at (any size
+   above zero when none was recorded), is kept and not downloaded again. Anything else under the name, such as the
+   user's edit or a file cut short, is left alone: `MediaProbe.freeName` picks `name (2).ext` (brackets, because
+   `name 2.ext` is a second page).
    Otherwise `save(_:of:to:progress:)` writes it. The default streams `media.url` through `MediaDownloader`; a source
    overrides it to resolve an address that has expired or to fall back to a smaller copy, as `PinterestSource` does.
 3. `MediaDownloader` has its own `Gate` of six and its own `URLSession`, so a long clip never holds up the details of
    the next link. It downloads to a temporary file, moves it next to the target as `<name>.partial`, then renames it in
-   one step, so a name in the folder is always a whole file. A 429 or 503 is tried up to three times, and the wait
+   one step, so a name in the folder is always a whole file. The rename (`renamex_np` with `RENAME_EXCL`) refuses a
+   name that is taken, so Nab never replaces a file it did not just write. A 429 or 503 is tried up to three times, and the wait
    between tries holds no slot. Cancelling the task, even while it waits for a slot, stops it and leaves no `.partial`. At launch, `MediaFolder.leftovers` finds `.partial` files with a
    source's name pattern, and only those, and they are removed.
 4. The pages of a pin save in parallel. Each finished file is written to the entry at once, so progress and a
    half-finished pin survive a quit.
 5. `MediaProbe` reads the saved file: size, real width and height, a clip's length, and an image's real type. A fallback
-   copy that is a JPEG is renamed to match.
+   copy that is a JPEG is renamed to match (`.jpg`), to a free name.
 6. When the last file lands, the entry is ready and, if **Copy each item when it lands** is on, copied. Every copy
-   first checks the saved files: one moved, deleted or cut short puts nothing on the clipboard and offers **Save
-   again**, which fetches only what is missing. Removing an
+   first checks the saved files: one moved, deleted or emptied puts nothing on the clipboard and offers **Save
+   again**, which fetches only what is missing. A file the user edited since is theirs: Copy, a drag and the gallery
+   use it as it is, and nabbing again does not fetch it. Removing an
    entry cancels its work and deletes its `.partial` file, never a saved file.
 
 A saved file is not checked while a page is drawn. It is checked when it is used (copy, drag, opening a page), and a

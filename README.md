@@ -114,8 +114,10 @@ Trail map (Pinterest 123456789012345678) 2.mp4
 
 Slashes and colons in a title become hyphens and a name is at most 100 characters. If a file with that name is
 already in the folder, Nab uses it and does not download it again. A download arrives in a temporary file and takes
-its name only when it is whole, so a name in the folder is always a complete file. Removing an item from the library never
-deletes its files: they are yours.
+its name only when it is whole, so a name in the folder is always a complete file. Nab never writes over a file: if
+the name holds something else (a file you edited, one cut short), the new copy is saved next to it as `… (2).jpg`. A
+saved file you edit stays yours and is copied as it is. Removing an item from the library never deletes its files:
+they are yours.
 
 Nab saves the original photo, and the largest of a clip's plain MP4 files. A clip Pinterest offers only as a stream
 is reported, not saved. Music in an idea pin is not saved.

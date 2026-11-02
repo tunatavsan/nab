@@ -76,6 +76,20 @@ struct DownloaderTests {
         #expect(leftovers() == ["Lamp (Pinterest 1).png"])
     }
 
+    /// A name that is taken when the transfer ends is refused, not replaced: the file there keeps its bytes and no
+    /// half file is left.
+    @Test func aTakenNameIsNeverReplaced() async throws {
+        MediaStub.set("/taken.png", [.init(status: 200, body: Data(repeating: 7, count: 64))])
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let file = folder.appending(path: "taken.png")
+        FileManager.default.createFile(atPath: file.path, contents: Data("mine".utf8))
+        await #expect(throws: (any Error).self) {
+            _ = try await downloader().download(URL(string: "https://media.example/taken.png")!, to: file)
+        }
+        #expect(try Data(contentsOf: file) == Data("mine".utf8))
+        #expect(leftovers() == ["taken.png"])
+    }
+
     @Test func refusalLeavesNothingAndSaysWhy() async throws {
         MediaStub.set("/gone.png", [.init(status: 403, body: Data("<Error/>".utf8))])
         let file = folder.appending(path: "x.png")
