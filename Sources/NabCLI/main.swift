@@ -5,56 +5,66 @@ import NabSources
 // nab <link>... — fetches every link in parallel and prints one context pack to stdout.
 // The same core the app uses, so agents can read videos and pins without the UI.
 
-let arguments = Array(CommandLine.arguments.dropFirst())
-let wantsJSON = arguments.contains("--json")
-var saveFolder: URL?
-var input: [String] = []
-var index = 0
-while index < arguments.count {
-    let argument = arguments[index]
-    if argument == "--save" {
-        guard index + 1 < arguments.count else {
-            FileHandle.standardError.write(Data("nab: --save needs a folder\n".utf8))
-            exit(64)
-        }
-        let path = (arguments[index + 1] as NSString).expandingTildeInPath
-        saveFolder = URL(filePath: path, directoryHint: .isDirectory, relativeTo: .currentDirectory()).absoluteURL
-        index += 2
-        continue
-    }
-    if !argument.hasPrefix("--") { input.append(argument) }
-    index += 1
-}
+func complain(_ message: String) { FileHandle.standardError.write(Data("nab: \(message)\n".utf8)) }
 
 let registry = SourceRegistry.standard
+let usage = """
+    usage: nab [--json] [--save <folder>] <link>...
+      Reads \(RackText.list(registry.names)) links in parallel and prints a context pack for AI: a video's
+      details and transcript, or an item's details and its photos and clips.
+      --json           print captures as JSON instead (photos and clips under "media")
+      --save <folder>  save each item's photos and clips there at full size; the pack lists the saved files
+    """
 
-if input.isEmpty || arguments.contains("--help") {
-    print(
-        """
-        usage: nab [--json] [--save <folder>] <link>...
-          Reads \(RackText.list(registry.names)) links in parallel and prints a context pack for AI: a video's
-          details and transcript, or an item's details and its photos and clips.
-          --json           print captures as JSON instead (photos and clips under "media")
-          --save <folder>  save each pin's photos and clips there at full size; the pack lists the saved files
-        """)
-    exit(input.isEmpty && !arguments.contains("--help") ? 64 : 0)
+let options: CLIOptions
+switch CLIOptions.parse(Array(CommandLine.arguments.dropFirst())) {
+case .success(let parsed): options = parsed
+case .failure(let problem):
+    complain(problem.message)
+    FileHandle.standardError.write(Data((usage + "\n").utf8))
+    exit(64)
 }
+if options.links.isEmpty || options.help {
+    print(usage)
+    exit(options.help ? 0 : 64)
+}
+
+// The folder is checked before anything is fetched, so a typo does not cost the downloads first.
+var saveFolder: URL?
+if let typed = options.saveFolder {
+    let path = (typed as NSString).expandingTildeInPath
+    let folder = URL(filePath: path, directoryHint: .isDirectory, relativeTo: .currentDirectory()).absoluteURL
+    do {
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        guard FileManager.default.isWritableFile(atPath: folder.path) else { throw CocoaError(.fileWriteNoPermission) }
+    } catch {
+        complain("can't save to \(typed): \(error.localizedDescription)")
+        exit(1)
+    }
+    saveFolder = folder
+}
+let input = options.links
 
 let found = registry.links(in: input.joined(separator: "\n"))
 if found.isEmpty {
-    FileHandle.standardError.write(Data("nab: no supported links found\n".utf8))
+    complain("no supported links found")
     exit(65)
 }
-// Share links (pin.it/…) name their item only after one request.
+// Share links (pin.it/…) name their item only after one request. Two links to one item (a share link and the
+// item's own, or two forms of a video link) are read once, as the app keeps one entry.
 var urls: [URL] = []
+var seen: Set<String> = []
 var expandFailed = false
 for url in found {
     do {
         let full = try await registry.expand(url)
-        if registry.match(full) != nil, !urls.contains(full) { urls.append(full) }
+        guard let match = registry.match(full) else {
+            throw NabError("The link led to \(full.host() ?? "a page") nab doesn't read.")
+        }
+        if seen.insert(match.entryID).inserted { urls.append(full) }
     } catch {
         expandFailed = true
-        FileHandle.standardError.write(Data("nab: \(url.absoluteString): \(error.localizedDescription)\n".utf8))
+        complain("\(url.absoluteString): \(error.localizedDescription)")
     }
 }
 
@@ -79,8 +89,7 @@ var captures: [Capture] = []
 for (url, result) in zip(urls, results) {
     switch result {
     case .success(let capture): captures.append(capture)
-    case .failure(let error):
-        FileHandle.standardError.write(Data("nab: \(url.absoluteString): \(error.localizedDescription)\n".utf8))
+    case .failure(let error): complain("\(url.absoluteString): \(error.localizedDescription)")
     }
 }
 
@@ -90,25 +99,27 @@ func save(_ capture: Capture, into folder: URL) async -> (Capture, failed: Bool)
     let names = MediaFileName.names(for: capture, sourceName: provider.name)
     var saved = capture
     var failed = false
-    await withTaskGroup(of: (Int, Result<Media, Error>).self) { group in
+    await withTaskGroup(of: (Int, Result<Media, Error>, kept: Bool).self) { group in
         for (i, media) in capture.media.enumerated() {
             group.addTask {
+                let file = folder.appending(path: names[i])
+                // A file saved before under this item's name is kept, not downloaded again.
+                let kept = MediaProbe.existing(file, size: media.byteCount) != nil
                 do {
-                    let item = try await provider.store(media, of: capture, at: folder.appending(path: names[i]))
-                    return (i, .success(item))
+                    return (i, .success(try await provider.store(media, of: capture, at: file)), kept)
                 } catch {
-                    return (i, .failure(error))
+                    return (i, .failure(error), kept)
                 }
             }
         }
-        for await (i, result) in group {
+        for await (i, result, kept) in group {
             switch result {
             case .success(let media):
                 saved.media[i] = media
-                FileHandle.standardError.write(Data("nab: saved \(media.savedPath ?? "")\n".utf8))
+                complain("\(kept ? "already saved" : "saved") \(media.savedPath ?? "")")
             case .failure(let error):
                 failed = true
-                FileHandle.standardError.write(Data("nab: \(names[i]): \(error.localizedDescription)\n".utf8))
+                complain("\(names[i]): \(error.localizedDescription)")
             }
         }
     }
@@ -124,7 +135,7 @@ if let saveFolder {
     }
 }
 
-if wantsJSON {
+if options.json {
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
     FileHandle.standardOutput.write(try encoder.encode(captures))
