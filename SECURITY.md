@@ -12,6 +12,8 @@ Examples of what to report:
 
 - Library entries, chats or transcripts reaching a place the user did not choose, such as a provider they did not
   select or an unexpected file.
+- A pin that makes Nab write outside the media folder, overwrite or delete a file it did not create, or fetch from a
+  host other than `pinimg.com`.
 - An API key written anywhere outside the keychain, or shown in the interface or a log.
 - A `nab://` URL that makes Nab do more than this: add links; open the library, a video, the open session's chat,
   Settings, the search palette or the menu bar panel; copy the session's context; start a new session; or open the
@@ -26,9 +28,22 @@ verified, and reporters are credited unless they prefer otherwise.
 
 ## What Nab does with your data
 
-Nab sends requests to YouTube to read a video and to the AI provider you configure when you summarize or ask a
-question. It has no account, no analytics and no server of its own. Your library and chats are JSON files in
-`~/Library/Application Support/Nab`; API keys are kept in the macOS keychain.
+Nab sends requests to YouTube to read a video, to Pinterest to read a pin and download its photos and clips, and to
+the AI provider you configure when you summarize or ask a question. It has no account, no analytics and no server of
+its own. Your library and chats are JSON files in `~/Library/Application Support/Nab`; API keys are kept in the macOS
+keychain. Saved photos and clips are ordinary files in the media folder (`~/Downloads/Nab` unless you chose another).
+
+The Pinterest requests are made without an account and without cookies. Nab never signs in to Pinterest and never
+reads your browser's cookies. It asks `www.pinterest.com` for a pin's details (and its page when that fails),
+`api.pinterest.com` to follow a `pin.it` share link, and downloads files only from `https` addresses on `pinimg.com`:
+an address in a pin's data that points anywhere else is ignored. A refusal from Pinterest is reported and not worked
+around. The context pack sent to an AI provider names a saved file but never its path, and the files themselves are
+not sent.
+
+File names come from a pin's title, so Nab removes path separators, colons and control characters, drops leading dots,
+and limits the name to 100 characters. A file is written next to its final name as `.partial` and renamed when whole;
+at launch, Nab removes only `.partial` files that carry its own name pattern. Removing an item from the library never
+deletes a saved file.
 
 The Claude Code and Codex providers run the command shown in Settings in your login shell, as you. Treat that field
 like a line in your shell profile. To show whether they are set up, Nab runs `--version`, `claude auth status` and
