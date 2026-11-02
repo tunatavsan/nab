@@ -14,6 +14,9 @@ struct PinterestPin: Sendable {
 
     enum Slot: Sendable {
         case image(Media)
+        /// A photo whose `originals` address was built by renaming the folder of a smaller copy, so its extension is
+        /// a guess to check before saving.
+        case guessed(Media)
         /// Every plain `.mp4` copy of one clip; `PinterestPin.choose` picks one.
         case video([Variant])
     }
@@ -24,6 +27,8 @@ struct PinterestPin: Sendable {
     var authorURL: URL?
     var thumbnail: URL?
     var slots: [Slot]
+    /// What of the pin cannot be saved, when part of it can ("2 of 5 clips can't be saved").
+    var note: String?
 
     static let changed = NabError("Pinterest changed its page; update Nab.")
     static let streamOnly = NabError("This clip is only offered as a stream Nab can't save yet.")
@@ -34,12 +39,17 @@ struct PinterestPin: Sendable {
     /// its own renditions (`V_EXP7` is the 720p original, `V_720P` the same on older pins).
     static func choose(_ variants: [Variant], sizes: [String: Int64]) -> Variant? {
         let known = variants.filter { sizes[$0.name] != nil }
-        let pool = known.isEmpty ? variants : known
-        return pool.max { lhs, rhs in
-            let l = (sizes[lhs.name] ?? 0, rank(lhs), area(lhs))
-            let r = (sizes[rhs.name] ?? 0, rank(rhs), area(rhs))
-            return l < r
-        }
+        let byName: (Variant, Variant) -> Bool = { (rank($0), area($0)) < (rank($1), area($1)) }
+        guard
+            let top = known.max(by: { lhs, rhs in
+                let l = (sizes[lhs.name] ?? 0, rank(lhs), area(lhs))
+                let r = (sizes[rhs.name] ?? 0, rank(rhs), area(rhs))
+                return l < r
+            })
+        else { return variants.max(by: byName) }
+        // A copy whose size could not be asked still wins over a known one when its name ranks higher.
+        let unknown = variants.filter { sizes[$0.name] == nil && rank($0) > rank(top) }
+        return unknown.max(by: byName) ?? top
     }
 
     private static func rank(_ variant: Variant) -> Int {
@@ -115,7 +125,9 @@ struct PinterestPin: Sendable {
     static func parse(api data: JSON) throws -> PinterestPin {
         var slots: [Slot] = []
         var paragraphs: [String] = []
-        var onlyStreams = false
+        var sawClip = false
+        var clips = 0
+        var skipped = 0
         var poster: URL?
 
         if let story = data["story_pin_data"] as? JSON {
@@ -129,8 +141,10 @@ struct PinterestPin: Sendable {
                         if let line = text(block["text"]) { words.append(line) }
                     } else if let list = (block["video"] as? JSON)?["video_list"] as? JSON {
                         let clip = variants(in: list)
+                        sawClip = sawClip || !clip.mp4.isEmpty || clip.stream
+                        clips += clip.mp4.isEmpty && !clip.stream ? 0 : 1
                         if clip.mp4.isEmpty {
-                            onlyStreams = onlyStreams || clip.stream
+                            skipped += clip.stream ? 1 : 0
                         } else {
                             found.append(.video(clip.mp4))
                             poster = poster ?? Self.poster(in: list)
@@ -144,33 +158,41 @@ struct PinterestPin: Sendable {
                             let url = PinterestURL.imageURL(
                                 size: "originals", hash: signature, ext: "jpg")
                         {
-                            found.append(.image(Media(kind: .image, url: url)))
+                            found.append(.guessed(Media(kind: .image, url: url)))
                         }
                     }
                 }
             }
             if !found.isEmpty { (slots, paragraphs) = (found, words) }
         }
+        let note: String? =
+            skipped == 0 || slots.isEmpty
+            ? nil
+            : skipped == clips
+                ? "\(skipped) \(skipped == 1 ? "clip" : "clips") can't be saved"
+                : "\(skipped) of \(clips) clips can't be saved"
 
         if slots.isEmpty, let carousel = data["carousel_data"] as? JSON {
             for slot in (carousel["carousel_slots"] as? [Any] ?? []).compactMap({ $0 as? JSON }) {
-                if let media = carouselImage(slot["images"] as? JSON) { slots.append(.image(media)) }
+                if let media = carouselImage(slot["images"] as? JSON) { slots.append(media) }
             }
         }
 
         if slots.isEmpty, let list = (data["videos"] as? JSON)?["video_list"] as? JSON {
             let found = variants(in: list)
-            if found.mp4.isEmpty {
-                onlyStreams = onlyStreams || found.stream
-            } else {
+            sawClip = sawClip || !found.mp4.isEmpty || found.stream
+            if !found.mp4.isEmpty {
                 slots = [.video(found.mp4)]
                 poster = poster ?? Self.poster(in: list)
             }
         }
 
         let orig = mediaImage((data["images"] as? JSON)?["orig"] as? JSON)
+        // The still image stands in only for a pin with no clip at all: a clip offered as a stream must say so, not
+        // quietly become its cover picture.
+        if slots.isEmpty, sawClip { throw streamOnly }
         if slots.isEmpty, let orig { slots = [.image(orig)] }
-        if slots.isEmpty { throw onlyStreams ? streamOnly : changed }
+        if slots.isEmpty { throw changed }
 
         let description = text(data["description"])
         let pinner = data["pinner"] as? JSON
@@ -185,7 +207,7 @@ struct PinterestPin: Sendable {
             author: text(pinner?["full_name"], limit: 200) ?? username,
             authorURL: username.flatMap(profileURL),
             thumbnail: orig?.url ?? poster ?? firstImage(in: slots),
-            slots: slots)
+            slots: slots, note: note)
         let lead = description ?? text(data["auto_alt_text"]) ?? text(data["seo_alt_text"])
         let summary = ([lead] + [paragraphs.isEmpty ? nil : paragraphs.joined(separator: "\n")])
             .compactMap { $0 }.joined(separator: "\n\n")
@@ -194,23 +216,25 @@ struct PinterestPin: Sendable {
     }
 
     /// The slot's copy at the original size: its folder is renamed, since only `originals` is the full picture.
-    private static func carouselImage(_ images: JSON?) -> Media? {
+    private static func carouselImage(_ images: JSON?) -> Slot? {
         guard let images else { return nil }
-        if let originals = mediaImage(images["originals"] as? JSON) { return originals }
+        if let originals = mediaImage(images["originals"] as? JSON) { return .image(originals) }
         let best = images.values.compactMap { $0 as? JSON }.filter { safeURL($0["url"]) != nil }
             .max { (dimension($0["width"]) ?? 0) < (dimension($1["width"]) ?? 0) }
         guard let best, let url = safeURL(best["url"]) else { return nil }
         let parts = url.pathComponents
         guard parts.count == 6, let image = PinterestURL.image(in: url),
             let full = PinterestURL.imageURL(size: "originals", hash: image.hash, ext: image.ext)
-        else { return Media(kind: .image, url: url) }
-        return Media(kind: .image, url: full)
+        else { return .image(Media(kind: .image, url: url)) }
+        return .guessed(Media(kind: .image, url: full))
     }
 
     private static func firstImage(in slots: [Slot]) -> URL? {
         slots.lazy.compactMap { slot -> URL? in
-            if case .image(let media) = slot { return media.url }
-            return nil
+            switch slot {
+            case .image(let media), .guessed(let media): return media.url
+            case .video: return nil
+            }
         }.first
     }
 
@@ -267,7 +291,7 @@ struct PinterestPin: Sendable {
         }
         return PinterestPin(
             title: title ?? "Pinterest pin", summary: summary, author: author, authorURL: authorURL,
-            thumbnail: poster ?? image, slots: slots)
+            thumbnail: poster ?? image, slots: slots, note: nil)
     }
 
     private static func jsonLD(in html: String) -> [JSON] {

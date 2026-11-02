@@ -28,6 +28,8 @@ public struct Capture: Codable, Sendable, Hashable {
     /// The photos and clips this item is made of, in order, once the source has picked the best copy of each.
     /// Empty for a video read as a transcript.
     public var media: [Media]
+    /// One line about what could not be saved ("2 of 5 clips can't be saved"), shown with the item's kind line.
+    public var note: String?
     /// A summary written by the user's chosen AI model, and which model wrote it.
     public var aiSummary: String?
     public var aiModel: String?
@@ -36,7 +38,7 @@ public struct Capture: Codable, Sendable, Hashable {
         source: SourceKind, sourceID: String, url: URL, title: String, author: String? = nil,
         authorURL: URL? = nil, duration: TimeInterval? = nil, viewCount: Int? = nil, summary: String? = nil,
         keywords: [String] = [], thumbnailURL: URL? = nil, chapters: [Chapter] = [], transcript: Transcript? = nil,
-        media: [Media] = []
+        media: [Media] = [], note: String? = nil
     ) {
         self.source = source
         self.sourceID = sourceID
@@ -52,6 +54,7 @@ public struct Capture: Codable, Sendable, Hashable {
         self.chapters = chapters
         self.transcript = transcript
         self.media = media
+        self.note = note
     }
 
     /// Written by hand only so files saved before `media` existed still open: a missing list is an empty one.
@@ -72,6 +75,7 @@ public struct Capture: Codable, Sendable, Hashable {
         transcript = try c.decodeIfPresent(Transcript.self, forKey: .transcript)
         // A photo or clip of a kind this version does not know (written by a newer one) is skipped, not the item.
         media = try c.decodeIfPresent([Lossy<Media>].self, forKey: .media)?.compactMap(\.value) ?? []
+        note = try c.decodeIfPresent(String.self, forKey: .note)
         aiSummary = try c.decodeIfPresent(String.self, forKey: .aiSummary)
         aiModel = try c.decodeIfPresent(String.self, forKey: .aiModel)
     }
