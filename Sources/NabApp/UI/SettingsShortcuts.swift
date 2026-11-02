@@ -13,7 +13,7 @@ struct SettingsShortcutsSection: View {
         ) {
             SettingsGroup {
                 ForEach(ShortcutAction.allCases, id: \.self) { ShortcutRow(action: $0) }
-                SettingsRow(title: "Restore Defaults") {
+                SettingsRow(title: "Default keys", detail: "Put every shortcut back to the one it came with.") {
                     NabButton("Restore Defaults") { store.restoreDefaults() }
                         .disabled(store.map.isDefault && store.refused == nil)
                 }
