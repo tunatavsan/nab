@@ -64,9 +64,11 @@ a 429 or 503 is tried up to three times with a growing wait.
 3. What the pin is made of is read in this order: an idea pin's pages, a carousel's slots, a clip, a photo. Each page of
    an idea pin becomes one `Media`, in order; music and sticker blocks are skipped and text blocks join the
    description, so a model can use them.
-4. A photo is `images.orig` as given: the extension is never guessed. If the original is refused with a 403, `save`
-   tries the same picture at 1200 and then 736 pixels wide.
+4. A photo is `images.orig` as given: the extension is never guessed. If the original is refused (a 4xx other than
+   429), `save` tries the same picture at 1200 and then 736 pixels wide, and the file is named for what arrived.
 5. A clip is chosen among its plain MP4 files by asking each for its size with a HEAD request and taking the largest.
+   A copy whose HEAD is refused (a 4xx other than 429) is never chosen, and if the chosen one is refused when it is
+   saved, `save` tries the others, best first.
    The width and height the API lists can be wrong, so `MediaProbe` reads the real ones from the saved file. A clip
    offered only as a stream is reported as one Nab can't save yet.
 6. Every address from a pin is checked: `https` and `pinimg.com` only. Anything else is ignored.

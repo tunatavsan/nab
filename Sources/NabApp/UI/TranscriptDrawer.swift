@@ -181,13 +181,10 @@ struct TranscriptDrawer: View {
             .help(isMedia ? "Open its page" : "Open the video page")
             Spacer()
             Button {
-                if isMedia, let capture = entry.capture {
-                    guard CopyPayload.missing([capture]).isEmpty else {
-                        withAnimation(Motion.snap) { blocked = true }
-                        return
-                    }
+                if isMedia {
+                    let copied = model.center.copy([entry]) { _ in withAnimation(Motion.snap) { blocked = true } }
+                    guard copied != nil else { return }
                     blocked = false
-                    Pasteboard.write(CopyPayload.single(capture))
                 } else {
                     Pasteboard.copy(TranscriptText.plain(paragraphs))
                 }

@@ -62,8 +62,8 @@ final class CaptureCenter {
     private var idleTask: Task<Void, Never>?
     /// Pasteboard change counts recorded when a nab began, per entry waiting for its auto-copy.
     private var copyMarks: [String: Int] = [:]
-    /// The pasteboard change count right after Nab's own last copy, so a later auto-copy may replace it.
-    private var ownCopyCount: Int?
+    /// Whether an item that lands may still copy itself (`ClipboardClaim`).
+    private var clipboard = ClipboardClaim()
     private static let sessionKey = "session"
 
     private struct SessionState: Codable {
@@ -321,20 +321,22 @@ final class CaptureCenter {
                 detail: Self.pasteHint(payload) + (pending > 0 ? " · \(pending) still fetching" : "")))
     }
 
-    /// The one way Nab copies items, wherever the copy starts (the shortcut, a button, a menu, the palette): photos
-    /// and clips as their files, anything read as text as one context pack, and nothing at all when a saved file is
-    /// gone (the rack says so and offers to save it again). Returns what went on the clipboard, nil when nothing did.
+    /// The one way Nab copies items, wherever the copy starts (the shortcut, a button, a menu, the palette, a record
+    /// page, an item that lands): photos and clips as their files, anything read as text as one context pack, and
+    /// nothing at all when a saved file is gone. Then the rack says so and offers to save it again, or `onMissing`
+    /// does, for a page that shows it in place. `automatic`: an item that landed copies itself, so the next one may
+    /// replace it. Returns what went on the clipboard, nil when nothing did.
     @discardableResult
-    func copy(_ entries: [Entry]) -> CopyPayload? {
+    func copy(_ entries: [Entry], automatic: Bool = false, onMissing: (([Entry]) -> Void)? = nil) -> CopyPayload? {
         let captures = entries.compactMap(\.capture)
         guard !captures.isEmpty else { return nil }
         guard CopyPayload.missing(captures).isEmpty else {
-            noteMissing(entries)
+            (onMissing ?? noteMissing)(entries)
             return nil
         }
         let payload = CopyPayload.session(captures)
         Pasteboard.write(payload)
-        ownCopyCount = Pasteboard.board.changeCount
+        clipboard.copied(at: Pasteboard.board.changeCount, automatic: automatic)
         return payload
     }
 
@@ -382,20 +384,16 @@ final class CaptureCenter {
         return k < 10 ? k.formatted(.number.precision(.fractionLength(1))) : Int(k.rounded()).formatted()
     }
 
-    /// Copies a fresh capture when the user asked for it and has not copied anything since nabbing: an item read
-    /// as text as its context, photos and clips as their files once they are saved.
+    /// Copies a fresh capture when the user asked for it and nothing was copied since nabbing but Nab's own
+    /// automatic copy (`ClipboardClaim`): an item read as text as its context, photos and clips as their files once
+    /// they are saved.
     private func autoCopy(_ entry: Entry) {
         guard entry.phase == .ready, let mark = copyMarks.removeValue(forKey: entry.id), let capture = entry.capture,
             UserDefaults.standard.bool(forKey: "autoCopy")
         else { return }
-        // Compare before copying: the copy itself bumps the count. Nab's own earlier copy may be replaced, so
-        // nabbing several items in a row leaves the latest one on the clipboard.
-        let current = Pasteboard.board.changeCount
-        if current == mark || current == ownCopyCount {
-            guard CopyPayload.missing([capture]).isEmpty else { return noteMissing([entry]) }
-            let payload = CopyPayload.single(capture)
-            Pasteboard.write(payload)
-            ownCopyCount = Pasteboard.board.changeCount
+        // Compare before copying: the copy itself bumps the count.
+        if clipboard.mayAutoCopy(mark: mark, current: Pasteboard.board.changeCount) {
+            guard let payload = copy([entry], automatic: true) else { return }
             copiedIDs.insert(entry.id)
             let detail =
                 switch payload {
