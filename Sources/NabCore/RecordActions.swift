@@ -5,8 +5,8 @@ public enum RecordActions {
     /// "Open on YouTube", "Open on Pinterest".
     public static func openLabel(sourceName: String) -> String { "Open on \(sourceName)" }
 
-    /// The saved files "Show in Finder" selects: only those Copy would hand over (on disk at the size they were saved
-    /// at); empty for a record read as text. `size` is a file's size, nil when there is none.
+    /// The saved files "Show in Finder" selects: only those Copy would hand over (still on disk, edited or not);
+    /// empty for a record read as text. `size` is a file's size, nil when there is none.
     public static func finderFiles(
         _ capture: Capture, size: (String) -> Int64? = { MediaProbe.fileSize(atPath: $0) }
     ) -> [URL] {

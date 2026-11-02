@@ -464,7 +464,8 @@ final class CaptureCenter {
     }
 
     /// Writes an entry's unsaved photos and clips to the media folder, all at once (the downloader's own gate keeps
-    /// the count sane). A file still where Nab left it, at the size it had, is kept and not downloaded again.
+    /// the count sane). A file already under the item's name at the size it was saved at is kept and not downloaded
+    /// again; anything else under that name is left alone and the copy goes next to it.
     private func save(_ id: String) {
         guard let entry = entry(id), let capture = entry.capture, capture.isMedia,
             let provider = registry.provider(for: capture.source)

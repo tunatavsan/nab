@@ -29,12 +29,13 @@ public enum CopyPayload: Equatable, Sendable {
         return file
     }
 
-    /// Saved files that are no longer where Nab put them, or no longer at the size they were saved at; checked when
-    /// they are used, never while drawing. `size` is a file's size, nil when there is none.
+    /// Saved files that are no longer where Nab put them: gone, or left empty. A file the user edited since stays
+    /// theirs and is used as it is. Checked when they are used, never while drawing. `size` is a file's size, nil
+    /// when there is none.
     public static func missing(
         _ captures: [Capture], size: (String) -> Int64? = { MediaProbe.fileSize(atPath: $0) }
     ) -> [Media] {
-        captures.flatMap(\.media).filter { item in item.savedPath.map { !item.isIntact(size: size($0)) } ?? false }
+        captures.flatMap(\.media).filter { item in item.savedPath.map { !Media.isPresent(size: size($0)) } ?? false }
     }
 
     private static func savedFiles(_ captures: [Capture]) -> [URL]? {

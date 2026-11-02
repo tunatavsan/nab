@@ -28,6 +28,8 @@ struct MediaProbeTests {
         #expect(MediaProbe.corrected(misnamed, type: facts.type)?.lastPathComponent == "Lamp (Pinterest 1).png")
         #expect(MediaProbe.corrected(folder.appending(path: "a.png"), type: facts.type) == nil)
         #expect(MediaProbe.corrected(folder.appending(path: "a.jpg"), type: .jpeg) == nil)
+        // A JPEG under another name becomes `.jpg`, the name the web gives it, not `.jpeg`.
+        #expect(MediaProbe.corrected(folder.appending(path: "a.png"), type: .jpeg)?.lastPathComponent == "a.jpg")
     }
 
     /// A source that writes a small picture instead of downloading, and counts how often it was asked.
@@ -67,10 +69,12 @@ struct MediaProbeTests {
         let renamed = try await painter.store(photo, of: pin, at: folder.appending(path: "Lamp (Pins 1).png"))
         #expect(painter.saves == 1)
         #expect(renamed.savedURL?.lastPathComponent == "Lamp (Pins 1).jpg")
-        // An empty file is not a saved one.
+        // An empty file is not a saved one; it is left where it is and the copy goes next to it.
         FileManager.default.createFile(atPath: folder.appending(path: "Lamp (Pins 2).png").path, contents: Data())
-        _ = try await painter.store(photo, of: pin, at: folder.appending(path: "Lamp (Pins 2).png"))
+        let beside = try await painter.store(photo, of: pin, at: folder.appending(path: "Lamp (Pins 2).png"))
         #expect(painter.saves == 2)
+        #expect(beside.savedURL?.lastPathComponent == "Lamp (Pins 2) (2).png")
+        #expect(MediaProbe.fileSize(atPath: folder.appending(path: "Lamp (Pins 2).png").path) == 0)
         // Nor is one at another size than the one it was saved at.
         var resized = photo
         resized.byteCount = (renamed.byteCount ?? 0) + 1
@@ -78,19 +82,20 @@ struct MediaProbeTests {
         #expect(painter.saves == 3)
     }
 
-    /// A file cut short or replaced is not the saved copy: Copy and a drag say it is gone, and nabbing again does not
-    /// take it as saved before.
-    @Test func aFileAtAnotherSizeIsNotTheSavedOne() throws {
-        var photo = Media(
+    /// A saved file the user edited since is still theirs: Copy, a drag and the gallery use it as it is. Only a file
+    /// that is gone or empty is missing. With no saved path to go by, a file cut short under the item's name is not
+    /// taken for the saved one.
+    @Test func anEditedFileIsUsedAsItIsAndAHalfFileIsNotTakenAsSaved() throws {
+        let photo = Media(
             kind: .image, url: URL(string: "https://i.example/a.png")!, savedPath: "/m/a.png", byteCount: 10)
-        #expect(photo.isIntact(size: 10))
-        #expect(!photo.isIntact(size: 9) && !photo.isIntact(size: 0) && !photo.isIntact(size: nil))
         let pin = Capture(
             source: SourceKind(rawValue: "pins"), sourceID: "1", url: photo.url, title: "Lamp", media: [photo])
-        #expect(CopyPayload.missing([pin]) { _ in 9 } == [photo])
-        #expect(CopyPayload.missing([pin]) { _ in 10 }.isEmpty)
-        photo.byteCount = nil
-        #expect(photo.isIntact(size: 1) && !photo.isIntact(size: 0))
+        #expect(CopyPayload.missing([pin]) { _ in 9 }.isEmpty)
+        #expect(CopyPayload.missing([pin]) { _ in 11 }.isEmpty)
+        #expect(CopyPayload.missing([pin]) { _ in 0 } == [photo])
+        #expect(CopyPayload.missing([pin]) { _ in nil } == [photo])
+        #expect(Media.isIntact(size: 10, expected: 10) && !Media.isIntact(size: 9, expected: 10))
+        #expect(Media.isIntact(size: 1, expected: nil) && !Media.isIntact(size: 0, expected: nil))
 
         let folder = FileManager.default.temporaryDirectory.appending(path: "nab-size-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -99,6 +104,34 @@ struct MediaProbeTests {
         #expect(MediaProbe.existing(file, size: 4) == file)
         #expect(MediaProbe.existing(file, size: 5) == nil)
         #expect(MediaProbe.existing(file) == file)
+    }
+
+    /// Nabbing again never writes over a file under the item's name that is not its saved copy (the user's own edit,
+    /// one cut short): the file keeps its bytes and its date, and the new copy takes the next free name, in a form a
+    /// page name never has (`Lamp (Pins 1) 2.png` is a second page).
+    @Test func aTakenNameIsNeverWrittenOver() async throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: "nab-taken-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let painter = Painter()
+        let theirs = folder.appending(path: "Lamp (Pins 1).png")
+        FileManager.default.createFile(atPath: theirs.path, contents: Data("mine".utf8))
+        let date = Date(timeIntervalSince1970: 1_000_000_000)
+        try FileManager.default.setAttributes([.modificationDate: date], ofItemAtPath: theirs.path)
+        FileManager.default.createFile(
+            atPath: folder.appending(path: "Lamp (Pins 1) (2).png").path, contents: Data("also".utf8))
+        // Saved before at another size, then forgotten when the file changed: the saved path is gone, the size kept.
+        var photo = Media(kind: .image, url: URL(string: "https://i.example/a.png")!)
+        photo.byteCount = 99
+        let pin = Capture(source: painter.kind, sourceID: "1", url: photo.url, title: "Lamp", media: [photo])
+        let saved = try await painter.store(photo, of: pin, at: theirs)
+        #expect(painter.saves == 1)
+        #expect(saved.savedURL?.lastPathComponent == "Lamp (Pins 1) (3).png")
+        #expect(try Data(contentsOf: theirs) == Data("mine".utf8))
+        let after = try FileManager.default.attributesOfItem(atPath: theirs.path)[.modificationDate] as? Date
+        #expect(after == date)
+        #expect(
+            MediaProbe.freeName(for: folder.appending(path: "Lamp (Pins 9).png")).lastPathComponent
+                == "Lamp (Pins 9).png")
     }
 
     /// An item an older Nab saved without its list of files holds nothing and is read again; a file of a kind a

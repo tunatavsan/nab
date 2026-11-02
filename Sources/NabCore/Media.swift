@@ -130,7 +130,8 @@ public final class MediaDownloader: Sendable {
     }
 
     /// Writes `url` to `file` and returns its size. The transfer goes to a temporary file, then to `<file>.partial`
-    /// next to the target, and takes the real name in one rename, so a half-written file never sits under it.
+    /// next to the target, and takes the real name in one rename, so a half-written file never sits under it. The
+    /// rename refuses a name that is already taken: a file Nab did not just write is never replaced.
     /// 429 and 503 are retried after a growing wait (`attempts` tries in all), waited out without holding a slot.
     /// Cancelling the calling task stops the transfer and leaves no partial file behind.
     @discardableResult
@@ -171,8 +172,7 @@ public final class MediaDownloader: Sendable {
             try fm.moveItem(at: temporary, to: partial)
             await beforeRename()
             try Task.checkCancellation()
-            // rename(2) replaces the target in one step on the same volume.
-            guard rename(partial.path, file.path) == 0 else { throw CocoaError(.fileWriteUnknown) }
+            try Self.claim(file, from: partial)
         } catch {
             try? fm.removeItem(at: partial)
             throw error
@@ -180,6 +180,17 @@ public final class MediaDownloader: Sendable {
         let size = (try? fm.attributesOfItem(atPath: file.path)[.size] as? NSNumber)?.int64Value ?? 0
         progress(size, size)
         return size
+    }
+
+    /// Gives `partial` the name `file` in one step, and refuses when anything is already there (`RENAME_EXCL`). A
+    /// volume that cannot refuse in the same step gets a move, which refuses a taken name too.
+    static func claim(_ file: URL, from partial: URL) throws {
+        if renamex_np(partial.path, file.path, UInt32(RENAME_EXCL)) == 0 { return }
+        switch errno {
+        case EEXIST: throw CocoaError(.fileWriteFileExists, userInfo: [NSFilePathErrorKey: file.path])
+        case ENOTSUP: try FileManager.default.moveItem(at: partial, to: file)
+        default: throw CocoaError(.fileWriteUnknown, userInfo: [NSFilePathErrorKey: file.path])
+        }
     }
 
     /// `photo.png.partial`: the name a file has while it is still arriving.

@@ -93,10 +93,9 @@ private struct MediaTile: View {
             loaded = .waiting
             return
         }
-        // The same test as Copy: a file moved, deleted or cut short is missing.
-        let item = item
-        let intact = await Task.detached { item.isIntact(size: MediaProbe.fileSize(atPath: file.path)) }.value
-        guard intact else {
+        // The same test as Copy: a file moved, deleted or emptied is missing; one edited since is shown as it is.
+        let present = await Task.detached { Media.isPresent(size: MediaProbe.fileSize(atPath: file.path)) }.value
+        guard present else {
             loaded = .missing
             return
         }
