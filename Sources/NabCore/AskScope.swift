@@ -184,8 +184,24 @@ public enum AskScope: Sendable, Hashable {
     /// How long a question waits for a record that is still being read.
     public static let holdLimit: TimeInterval = 120
 
-    public static func holdExpired(since start: Date, now: Date) -> Bool {
-        now.timeIntervalSince(start) >= holdLimit
+    /// Records a held question names when it goes without them: still being read, or failed by then.
+    public static func missingRecords(_ records: [(id: String, hasCapture: Bool, reading: Bool, failed: Bool)])
+        -> [String]
+    {
+        records.filter { !$0.hasCapture && ($0.reading || $0.failed) }.map(\.id)
+    }
+
+    /// The failed notes just above the latest question (a time-out note): the floating window shows them with
+    /// the answer, since it only draws the last answer.
+    public static func notes(in messages: [ChatMessage]) -> [String] {
+        guard let question = messages.lastIndex(where: { $0.role == .user }) else { return [] }
+        var notes: [String] = []
+        var index = question - 1
+        while index >= 0, messages[index].role == .assistant, messages[index].failed {
+            notes.insert(messages[index].text, at: 0)
+            index -= 1
+        }
+        return notes
     }
 
     /// The one chat line for records that did not arrive in time.

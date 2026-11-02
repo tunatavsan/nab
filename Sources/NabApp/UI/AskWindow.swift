@@ -8,7 +8,7 @@ import SwiftUI
 @MainActor @Observable
 final class AskModel {
     var scope = AskScope.session {
-        didSet { locked = nil }
+        didSet { lockState.reset() }
     }
     /// The open session's records, read live: still-fetching ones and the front tab's record are in it, and it
     /// follows the session as captures land. Reading it in a view body tracks the session.
@@ -20,7 +20,10 @@ final class AskModel {
     /// Records handed in by a caller that are neither the session nor the latest one.
     var pinned: [String]?
     /// The records of the chat a question was sent or held in; the window stays on it until the picker or a reopen.
-    var locked: [String]?
+    var lockState = AskLockState()
+    var locked: [String]? { lockState.ids }
+    /// A question went in: stay on its chat.
+    func didAsk(_ ids: [String]) { lockState.lock(ids) }
     var draft = ""
     /// Set when the window came from a link or with a draft: no summary goes out until the user asks for one.
     var holdsSummary = false
@@ -104,7 +107,7 @@ final class AskWindowController {
     /// is the record the shortcut nabbed from the front tab: the scope starts on it whatever the session holds.
     func show(ids: [String]? = nil, focus: String? = nil, draft: String? = nil, holdsSummary: Bool = false) {
         refresh()
-        model.locked = nil
+        model.lockState.reset()
         model.focusID = focus
         if focus != nil {
             model.scope = AskScope.initial(sessionIDs: model.sessionIDs, focus: focus)
@@ -189,6 +192,7 @@ final class AskWindowController {
         // What the summary is about is fixed now; the chat may load for a while.
         let scope = model.scope
         let pinned = model.pinned != nil
+        let generation = model.lockState.generation
         Task {
             await assistant.load(ids)
             guard assistant.conversation(ids)?.messages.isEmpty ?? true else { return }
@@ -196,7 +200,8 @@ final class AskWindowController {
                 model.choosing = true
             } else {
                 if assistant.summarize(ids) {
-                    model.locked = ids
+                    // Only if the scope and the window are still where the summary was asked.
+                    model.lockState.lock(ids, ifGeneration: generation)
                     markUsed(scope: scope, pinned: pinned, count: ids.count)
                 } else {
                     // Nothing went out: the Summarize view comes back instead of a wait that never ends.
@@ -415,6 +420,9 @@ struct AskView: View {
             }
         } else if let answer = messages.last(where: { $0.role == .assistant }) {
             let question = messages.last { $0.role == .user }
+            ForEach(AskScope.notes(in: messages), id: \.self) { note in
+                Text(note).font(Typeface.meta).foregroundStyle(Palette.inkTertiary)
+            }
             Text(
                 AskScope.heading(
                     summary: question?.isSummaryRequest ?? false, question: question?.text,
@@ -488,7 +496,7 @@ struct AskView: View {
         let (scope, pinned) = (model.scope, model.pinned != nil)
         if assistant.ask(model.draft, about: ids) {
             model.draft = ""
-            model.locked = ids
+            model.didAsk(ids)
             model.sent(scope, pinned, ids.count)
         }
     }

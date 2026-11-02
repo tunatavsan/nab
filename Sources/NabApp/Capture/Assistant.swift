@@ -18,7 +18,7 @@ final class Assistant {
     private var byID: [String: Conversation] = [:]
     @ObservationIgnored let previewCache = ChatPreviewCache()
     /// The clock a held question measures its wait with; tests and previews may replace it.
-    @ObservationIgnored var clock: () -> Date = { .now }
+    @ObservationIgnored var clock: () -> ContinuousClock.Instant = { .now }
     private(set) var streaming: Set<String> = []
     /// Questions typed while their record was still being read, by chat. They go out by themselves when the capture
     /// arrives, even if the window that took them is gone; kept in memory only.
@@ -255,13 +255,11 @@ final class Assistant {
         let id = Conversation.id(for: entryIDs)
         waiting[id] = question
         tasks[id] = Task { [weak self] in
-            let start = self?.clock() ?? .now
-            while let self, !Task.isCancelled, !AskScope.holdExpired(since: start, now: self.clock()),
-                entryIDs.contains(where: { self.center.entry($0)?.phase == .fetching })
-            {
-                try? await Task.sleep(for: .milliseconds(150))
-            }
-            self?.release(id, question, entryIDs, cancelled: Task.isCancelled)
+            guard let self else { return }
+            _ = await HeldWait.wait(
+                reading: { entryIDs.contains { self.center.entry($0)?.phase == .fetching } },
+                cancelled: { Task.isCancelled }, now: { self.clock() }, sleep: { try? await Task.sleep(for: $0) })
+            self.release(id, question, entryIDs, cancelled: Task.isCancelled)
         }
     }
 
@@ -275,7 +273,15 @@ final class Assistant {
         case .send:
             // A fetch still stuck after the limit does not hold the question back: it goes with what is ready, and
             // one chat line says what is missing.
-            let missing = entryIDs.filter { center.entry($0)?.phase == .fetching }.map { center.entry($0)?.title ?? $0 }
+            let missing = AskScope.missingRecords(
+                entryIDs.map {
+                    let entry = center.entry($0)
+                    return (
+                        id: $0, hasCapture: entry?.capture != nil, reading: entry?.phase == .fetching,
+                        failed: entry?.failure != nil
+                    )
+                }
+            ).map { center.entry($0)?.title ?? $0 }
             if !missing.isEmpty {
                 var conversation = byID[id] ?? Conversation(entryIDs: entryIDs)
                 conversation.messages.append(
