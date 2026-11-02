@@ -68,7 +68,9 @@ a 429 or 503 is tried up to three times with a growing wait.
    429), `save` tries the same picture at 1200 and then 736 pixels wide, and the file is named for what arrived.
 5. A clip is chosen among its plain MP4 files by asking each for its size with a HEAD request and taking the largest.
    A copy whose HEAD is refused (a 4xx other than 429) is never chosen, and if the chosen one is refused when it is
-   saved, `save` tries the others, best first.
+   saved, `save` tries the others, best first. The others are remembered for the last 256 clips; when there are none
+   left (or none after a restart), `save` reads the pin once more for fresh copies, and never twice. A clip whose
+   every copy is refused drops on its own: the rest of the pin is saved and a note says how many clips are missing.
    The width and height the API lists can be wrong, so `MediaProbe` reads the real ones from the saved file. A clip
    offered only as a stream is reported as one Nab can't save yet.
 6. Every address from a pin is checked: `https` and `pinimg.com` only. Anything else is ignored.

@@ -27,8 +27,17 @@ struct PinterestPin: Sendable {
     var authorURL: URL?
     var thumbnail: URL?
     var slots: [Slot]
+    /// How many clips the pin has, and how many of them are only offered as a stream.
+    var clips = 0
+    var streams = 0
+
     /// What of the pin cannot be saved, when part of it can ("2 of 5 clips can't be saved").
-    var note: String?
+    static func note(lost: Int, of total: Int) -> String? {
+        guard lost > 0 else { return nil }
+        return lost >= total
+            ? "\(lost) \(lost == 1 ? "clip" : "clips") can't be saved"
+            : "\(lost) of \(total) clips can't be saved"
+    }
 
     static let changed = NabError("Pinterest changed its page; update Nab.")
     static let streamOnly = NabError("This clip is only offered as a stream Nab can't save yet.")
@@ -176,13 +185,7 @@ struct PinterestPin: Sendable {
             }
             if !found.isEmpty { (slots, paragraphs) = (found, words) }
         }
-        let note: String? =
-            skipped == 0 || slots.isEmpty
-            ? nil
-            : skipped == clips
-                ? "\(skipped) \(skipped == 1 ? "clip" : "clips") can't be saved"
-                : "\(skipped) of \(clips) clips can't be saved"
-
+        let (total, streams) = slots.isEmpty ? (0, 0) : (clips, skipped)
         if slots.isEmpty, let carousel = data["carousel_data"] as? JSON {
             for slot in (carousel["carousel_slots"] as? [Any] ?? []).compactMap({ $0 as? JSON }) {
                 if let media = carouselImage(slot["images"] as? JSON) { slots.append(media) }
@@ -218,7 +221,7 @@ struct PinterestPin: Sendable {
             author: text(pinner?["full_name"], limit: 200) ?? username,
             authorURL: username.flatMap(profileURL),
             thumbnail: orig?.url ?? poster ?? firstImage(in: slots),
-            slots: slots, note: note)
+            slots: slots, clips: total, streams: streams)
         let lead = description ?? text(data["auto_alt_text"]) ?? text(data["seo_alt_text"])
         let summary = ([lead] + [paragraphs.isEmpty ? nil : paragraphs.joined(separator: "\n")])
             .compactMap { $0 }.joined(separator: "\n\n")
@@ -307,7 +310,7 @@ struct PinterestPin: Sendable {
         }
         return PinterestPin(
             title: title ?? "Pinterest pin", summary: summary, author: author, authorURL: authorURL,
-            thumbnail: poster ?? image, slots: slots, note: nil)
+            thumbnail: poster ?? image, slots: slots, clips: 1, streams: 0)
     }
 
     private static func jsonLD(in html: String) -> [JSON] {

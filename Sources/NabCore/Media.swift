@@ -26,10 +26,16 @@ public enum MediaFolder {
         in folder: URL, sourceNames: [String], fileManager: FileManager = .default
     ) -> [URL] {
         let names = (try? fileManager.contentsOfDirectory(atPath: folder.path)) ?? []
+        // Exactly what `MediaFileName.make` writes, plus `.partial`: `<title> (<Source> <id>)[ <page>].<ext>.partial`
+        // (the title may be empty), or the same with the ` (2)` of a copy saved next to a taken name
+        // (`MediaProbe.freeName`). A user's file that merely mentions a source is not matched.
+        let sources = sourceNames.map(NSRegularExpression.escapedPattern(for:)).joined(separator: "|")
+        let pattern = try? NSRegularExpression(
+            pattern: #"^(?:.+ )?\((?:"# + sources + #") [^()]+\)(?: \d+)?(?: \(\d+\))?\.[A-Za-z0-9]{1,5}\.partial$"#)
         return
             names
             .filter { name in
-                name.hasSuffix(".partial") && sourceNames.contains { name.contains(" (\($0) ") }
+                pattern?.firstMatch(in: name, range: NSRange(name.startIndex..., in: name)) != nil
             }
             .sorted()
             .map { folder.appending(path: $0) }
@@ -183,14 +189,24 @@ public final class MediaDownloader: Sendable {
     }
 
     /// Gives `partial` the name `file` in one step, and refuses when anything is already there (`RENAME_EXCL`). A
-    /// volume that cannot refuse in the same step gets a move, which refuses a taken name too.
-    static func claim(_ file: URL, from partial: URL) throws {
-        if renamex_np(partial.path, file.path, UInt32(RENAME_EXCL)) == 0 { return }
-        switch errno {
-        case EEXIST: throw CocoaError(.fileWriteFileExists, userInfo: [NSFilePathErrorKey: file.path])
-        case ENOTSUP: try FileManager.default.moveItem(at: partial, to: file)
-        default: throw CocoaError(.fileWriteUnknown, userInfo: [NSFilePathErrorKey: file.path])
+    /// volume that cannot refuse in the same step gets `link(2)`, which refuses a taken name just as atomically, and
+    /// the partial name is dropped after it; a volume with no links either is an error, never a "look, then move".
+    /// `exclusiveRename` is the first step, replaceable so the fallback can be reached.
+    static func claim(
+        _ file: URL, from partial: URL,
+        exclusiveRename: (String, String) -> Int32 = { renamex_np($0, $1, UInt32(RENAME_EXCL)) }
+    ) throws {
+        if exclusiveRename(partial.path, file.path) == 0 { return }
+        var reason = errno
+        if reason == ENOTSUP {
+            if link(partial.path, file.path) == 0 {
+                unlink(partial.path)
+                return
+            }
+            reason = errno
         }
+        if reason == EEXIST { throw CocoaError(.fileWriteFileExists, userInfo: [NSFilePathErrorKey: file.path]) }
+        throw CocoaError(.fileWriteUnknown, userInfo: [NSFilePathErrorKey: file.path])
     }
 
     /// `photo.png.partial`: the name a file has while it is still arriving.
