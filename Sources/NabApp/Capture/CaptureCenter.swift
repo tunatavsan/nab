@@ -209,6 +209,11 @@ final class CaptureCenter {
     func retry(_ id: String) {
         guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
         entries[index].failure = nil
+        // Files moved or deleted since are saved again.
+        if let capture = entries[index].capture, capture.isMedia {
+            let gone = CopyPayload.missing([capture])
+            if !gone.isEmpty { forget(gone, in: id) }
+        }
         if let capture = entries[index].capture, capture.isMedia, capture.media.contains(where: { $0.savedPath == nil })
         {
             persist(entries[index])

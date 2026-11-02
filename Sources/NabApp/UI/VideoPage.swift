@@ -11,7 +11,7 @@ struct VideoPage: View {
         if let entry = model.center.entry(entryID) {
             VideoContent(entry: entry, model: model)
         } else {
-            Text("This video is no longer in the library.")
+            Text("This item is no longer in the library.")
                 .font(Typeface.meta)
                 .foregroundStyle(Palette.inkTertiary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -38,6 +38,8 @@ private struct VideoContent: View {
     @State private var tokens: Int?
     @State private var copiedContext = false
     @State private var copiedTranscript = false
+    /// A copy or a reveal found a saved file gone.
+    @State private var blocked = false
     @FocusState private var finding: Bool
     @State private var hoveredChapter: Int?
     @State private var timelineWidth: CGFloat = 0
@@ -49,7 +51,11 @@ private struct VideoContent: View {
     var body: some View {
         HStack(spacing: Space.s) {
             aside.frame(width: 344).libraryCell()
-            transcriptSection.libraryCell(reading: true)
+            if capture?.isMedia == true {
+                MediaGallery(entry: entry, center: model.center).libraryCell(reading: true)
+            } else {
+                transcriptSection.libraryCell(reading: true)
+            }
         }
         .task(id: entry.id) { await loadTokens() }
         // A window that opens focuses its first text field, which would light the find field whenever a video is
@@ -103,8 +109,10 @@ private struct VideoContent: View {
     private var aside: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                if MiniPlayer.shared.embeddedVideoID == YouTubeID.id(fromEntryID: entry.id) {
+                if RecordActions.isEmbedded(playing: MiniPlayer.shared.embeddedVideoID, entryID: entry.id) {
                     EmbeddedPlayer()
+                } else if capture?.isMedia == true {
+                    RecordCover(entry: entry)
                 } else {
                     VideoCover(entry: entry, onClipboard: model.center.copiedIDs.contains(entry.id))
                 }
@@ -127,15 +135,25 @@ private struct VideoContent: View {
 
     @ViewBuilder private var status: some View {
         switch entry.phase {
-        case .fetching, .saving:
+        case .fetching,
+            .saving where capture?.isMedia != true:
             HStack(spacing: Space.s) {
                 PhaseMark(phase: .fetching)
                 Text("Fetching transcript…")
             }
             .font(Typeface.meta)
             .foregroundStyle(Palette.inkSecondary)
+        case .saving:
+            Text(capture.flatMap { RackText.kindLine($0, saving: model.center.savingProgress[entry.id]) } ?? "")
+                .font(Typeface.meta)
+                .foregroundStyle(Palette.inkSecondary)
         case .failed:
             Text("Could not be read").font(Typeface.meta).foregroundStyle(Palette.error)
+        case .ready where capture?.isMedia == true:
+            let line = capture.flatMap { RackText.kindLine($0) }
+            Text([capture?.author, line].compactMap { $0 }.joined(separator: " · "))
+                .font(Typeface.meta)
+                .foregroundStyle(Palette.inkTertiary)
         case .ready:
             let fetched = "fetched " + entry.addedAt.formatted(date: .omitted, time: .shortened)
             Text([capture?.author, fetched].compactMap { $0 }.joined(separator: " · "))
@@ -159,30 +177,67 @@ private struct VideoContent: View {
             switch entry.phase {
             case .ready:
                 NabButton(
-                    "Ask AI about this video", kind: .primary, size: .large, fullWidth: true, action: model.summarize)
+                    "Ask AI about this", kind: .primary, size: .large, fullWidth: true, action: model.summarize)
                 Grid(horizontalSpacing: Space.s, verticalSpacing: Space.s) {
                     GridRow {
-                        NabButton(copiedContext ? "Copied" : "Copy context", fullWidth: true) {
-                            guard let capture else { return }
-                            Pasteboard.copy(ContextPack.render([capture]))
-                            flash($copiedContext)
+                        NabButton(copiedContext ? "Copied" : (isMedia ? "Copy" : "Copy context"), fullWidth: true) {
+                            copy()
                         }
-                        NabButton("Open on YouTube", fullWidth: true) {
-                            PlaybackRouter.shared.openInBrowser(entryID: entry.id)
-                        }
+                        NabButton(
+                            RecordActions.openLabel(sourceName: entry.source.displayName),
+                            fullWidth: true, action: openOnSource)
                     }
                     GridRow {
-                        NabButton("Export…", fullWidth: true, action: model.export)
-                            .help("Save the video's context as a Markdown file")
-                        NabButton("Fetch again", fullWidth: true) { model.center.retry(entry.id) }
+                        if isMedia {
+                            NabButton("Show in Finder", fullWidth: true, action: showInFinder)
+                            NabButton("Fetch again", fullWidth: true) { model.center.retry(entry.id) }
+                        } else {
+                            NabButton("Export…", fullWidth: true, action: model.export)
+                                .help("Save the video's context as a Markdown file")
+                            NabButton("Fetch again", fullWidth: true) { model.center.retry(entry.id) }
+                        }
                     }
                 }
+                if blocked { MissingNote { model.center.retry(entry.id) } }
             case .failed:
                 NabButton("Try again", kind: .primary, size: .large, fullWidth: true) { model.center.retry(entry.id) }
             case .fetching, .saving:
                 EmptyView()
             }
         }
+        .onChange(of: entry.phase) { blocked = false }
+    }
+
+    private var isMedia: Bool { capture?.isMedia == true }
+
+    /// Photos and clips go as their files; if one is gone nothing is copied and the page says so.
+    private func copy() {
+        guard let capture else { return }
+        guard CopyPayload.missing([capture]).isEmpty else {
+            withAnimation(Motion.snap) { blocked = true }
+            return
+        }
+        blocked = false
+        Pasteboard.write(CopyPayload.single(capture))
+        flash($copiedContext)
+    }
+
+    private func openOnSource() {
+        if entry.source == .youtube {
+            PlaybackRouter.shared.openInBrowser(entryID: entry.id)
+        } else {
+            NSWorkspace.shared.open(capture?.url ?? entry.url)
+        }
+    }
+
+    private func showInFinder() {
+        guard let capture else { return }
+        let files = RecordActions.finderFiles(capture)
+        guard !files.isEmpty else {
+            withAnimation(Motion.snap) { blocked = true }
+            return
+        }
+        NSWorkspace.shared.activateFileViewerSelecting(files)
     }
 
     private func flash(_ flag: Binding<Bool>) {
@@ -723,5 +778,29 @@ enum CoverCache {
             return image
         }
         return nil
+    }
+}
+
+/// A photo's or clip's cover at column width, fitted whole, from the file saved on this Mac.
+private struct RecordCover: View {
+    let entry: Entry
+    @State private var image: NSImage?
+
+    var body: some View {
+        Palette.well
+            .aspectRatio(16 / 9, contentMode: .fit)
+            .overlay {
+                if let image = ThumbnailCache.cached(entry.cardCovers) ?? image {
+                    Image(nsImage: image).resizable().aspectRatio(contentMode: .fit).transition(.opacity)
+                }
+            }
+            .clipShape(.rect(cornerRadius: Radius.thumb, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Radius.thumb, style: .continuous).strokeBorder(Palette.line))
+            .accessibilityLabel(entry.title)
+            .task(id: entry.cardCovers) {
+                guard ThumbnailCache.cached(entry.cardCovers) == nil else { return }
+                let loaded = await ThumbnailCache.image(entry.cardCovers)
+                withAnimation(Motion.settle) { image = loaded }
+            }
     }
 }
